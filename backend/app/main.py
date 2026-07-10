@@ -3,7 +3,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, schemas_api, users
+from app.api import (
+    auth,
+    exports,
+    projects,
+    records,
+    reports,
+    schemas_api,
+    sync,
+    users,
+)
+from app.api import settings as settings_api
 from app.config import get_settings
 
 
@@ -13,15 +23,15 @@ async def lifespan(_: FastAPI):
 
 
 def create_app() -> FastAPI:
-    settings = get_settings()
+    cfg = get_settings()
     app = FastAPI(
-        title=settings.app_name,
+        title=cfg.app_name,
         version="0.1.0",
         lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origin_list,
+        allow_origins=cfg.cors_origin_list,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -29,10 +39,16 @@ def create_app() -> FastAPI:
     app.include_router(auth.router)
     app.include_router(users.router)
     app.include_router(schemas_api.router)
+    app.include_router(projects.router)
+    app.include_router(records.router)
+    app.include_router(sync.router)
+    app.include_router(reports.router)
+    app.include_router(exports.router)
+    app.include_router(settings_api.router)
 
     @app.get("/api/health")
     async def health():
-        return {"status": "ok", "app": settings.app_name}
+        return {"status": "ok", "app": cfg.app_name}
 
     return app
 

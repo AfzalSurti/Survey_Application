@@ -1,18 +1,21 @@
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models import QuestionnaireSchema, SurveyModule, User
+from app.models import QuestionnaireSchema, SurveyModule, User, UserRole
+from app.schemas.survey import QuestionnaireSchemaActivation, QuestionnaireSchemaCreate
 
 
 router = APIRouter(prefix="/api/schemas", tags=["schemas"])
 
 
 class SchemaOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
     id: str
     module: SurveyModule
@@ -29,6 +32,49 @@ class SchemaOut(BaseModel):
             schema_json=row.schema_json,
             is_active=row.is_active,
         )
+
+
+@router.get("", response_model=list[SchemaOut])
+async def list_schemas(
+    module: SurveyModule | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> list[SchemaOut]:
+    query = select(QuestionnaireSchema)
+    if module is not None:
+        query = query.where(QuestionnaireSchema.module == module)
+    result = await db.execute(query.order_by(QuestionnaireSchema.module, QuestionnaireSchema.version.desc()))
+    return [SchemaOut.from_orm_row(row) for row in result.scalars().all()]
+
+
+@router.post("", response_model=SchemaOut, status_code=status.HTTP_201_CREATED)
+async def create_schema_version(
+    body: QuestionnaireSchemaCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.super_admin)),
+) -> SchemaOut:
+    existing = await db.scalar(
+        select(QuestionnaireSchema).where(
+            QuestionnaireSchema.module == body.module,
+            QuestionnaireSchema.version == body.version,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Schema version already exists")
+    if body.is_active:
+        active = await db.execute(
+            select(QuestionnaireSchema).where(
+                QuestionnaireSchema.module == body.module,
+                QuestionnaireSchema.is_active.is_(True),
+            )
+        )
+        for row in active.scalars():
+            row.is_active = False
+    schema = QuestionnaireSchema(**body.model_dump(), created_by=user.id)
+    db.add(schema)
+    await db.flush()
+    await db.refresh(schema)
+    return SchemaOut.from_orm_row(schema)
 
 
 @router.get("/active")
@@ -74,3 +120,29 @@ async def get_active_schema_for_module(
 
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active schema for module")
     return SchemaOut.from_orm_row(row)
+
+
+@router.patch("/{schema_id}", response_model=SchemaOut)
+async def set_schema_active(
+    schema_id: UUID,
+    body: QuestionnaireSchemaActivation,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.super_admin)),
+) -> SchemaOut:
+    schema = await db.scalar(select(QuestionnaireSchema).where(QuestionnaireSchema.id == schema_id))
+    if schema is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Schema not found")
+    if body.is_active:
+        active = await db.execute(
+            select(QuestionnaireSchema).where(
+                QuestionnaireSchema.module == schema.module,
+                QuestionnaireSchema.is_active.is_(True),
+                QuestionnaireSchema.id != schema.id,
+            )
+        )
+        for row in active.scalars():
+            row.is_active = False
+    schema.is_active = body.is_active
+    await db.flush()
+    await db.refresh(schema)
+    return SchemaOut.from_orm_row(schema)
