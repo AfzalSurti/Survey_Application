@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "GDRPL Survey",
+    "slug": "gdrpl-survey",
+    "scheme": "gdrplsurvey",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/gdrpl-logo.png",
+    "userInterfaceStyle": "automatic",
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "Allow GDRPL Survey to capture structure photos." }],
+      ["expo-location", { "locationWhenInUsePermission": "Allow GDRPL Survey to capture survey coordinates." }],
+      "expo-secure-store"
+    ],
+    "android": { "package": "com.gdrpl.survey", "adaptiveIcon": { "foregroundImage": "./assets/gdrpl-logo.png", "backgroundColor": "#DCEBFB" } },
+    "ios": { "bundleIdentifier": "com.gdrpl.survey" }
+  }
+}
