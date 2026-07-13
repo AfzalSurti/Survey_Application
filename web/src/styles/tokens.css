@@ -1,0 +1,16 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
+
+:root {
+  --bg-top: #DCEBFB;
+  --bg-bottom: #C3DEF5;
+  --glass-surface: rgba(255, 255, 255, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.78);
+  --glass-shadow: 0 18px 45px rgba(46, 102, 157, 0.14);
+  --ink: #1B3A5C;
+  --accent-primary: #1B4F8C;
+  --accent-secondary: #6FA83E;
+  --warn: #E0A33B;
+  --danger: #B95454;
+  --muted: #627b95;
+  --radius: 18px;
+}
