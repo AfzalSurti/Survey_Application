@@ -55,6 +55,21 @@ async def seed() -> None:
             db.add(surveyor)
             print("Created surveyor: surveyor@gdrpl.com / Surveyor123!")
 
+        result = await db.execute(select(User).where(User.email == "admin.ops@gdrpl.com"))
+        ops_admin = result.scalar_one_or_none()
+        if ops_admin is None:
+            ops_admin = User(
+                id=uuid.uuid4(),
+                name="GDRPL Admin",
+                email="admin.ops@gdrpl.com",
+                password_hash=hash_password("Admin123!"),
+                role=UserRole.admin,
+                organization="Geo Design and Research Pvt. Ltd.",
+                is_active=True,
+            )
+            db.add(ops_admin)
+            print("Created admin: admin.ops@gdrpl.com / Admin123!")
+
         await db.flush()
 
         for module, schema in (

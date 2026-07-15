@@ -39,8 +39,9 @@ Set API base URL in Settings (Android emulator: `http://10.0.2.2:8000`, device: 
 ## Demo accounts
 | Role | Email | Password |
 |---|---|---|
-| Super Admin | `admin@gdrpl.com` | `ChangeMe123!` |
 | Surveyor | `surveyor@gdrpl.com` | `Surveyor123!` |
+| Admin | `admin.ops@gdrpl.com` | `Admin123!` |
+| Super Admin | `admin@gdrpl.com` | `ChangeMe123!` |
 
 ## API surface
 - Auth: `/api/auth/login`, `/refresh`, `/me`
