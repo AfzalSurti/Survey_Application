@@ -12,14 +12,23 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     project_number: str = Field(min_length=1, max_length=100)
     highway_number: str = Field(min_length=1, max_length=100)
+    surveyor_ids: list[UUID] = Field(default_factory=list)
 
 
-class ProjectOut(ProjectCreate):
+class ProjectOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    name: str
+    project_number: str
+    highway_number: str
     created_by: UUID
     created_at: datetime
+    surveyor_ids: list[UUID] = Field(default_factory=list)
+
+
+class ProjectAssignRequest(BaseModel):
+    surveyor_ids: list[UUID] = Field(default_factory=list)
 
 
 class PreSurveyEntryCreate(BaseModel):
@@ -65,6 +74,18 @@ class SurveyRecordPage(BaseModel):
 
 class SurveyRecordStatusUpdate(BaseModel):
     status: SurveyStatus
+
+
+class SurveyRecordDataUpdate(BaseModel):
+    """Admin/super_admin may correct field values — not questionnaire architecture."""
+
+    chainage: str | None = None
+    structure_category: str | None = None
+    responses_json: dict[str, Any] | None = None
+    latitude: Decimal | None = None
+    longitude: Decimal | None = None
+    captured_at: datetime | None = None
+    status: SurveyStatus | None = None
 
 
 class SyncSurveyRecordRequest(BaseModel):
@@ -122,7 +143,7 @@ class QuestionnaireSchemaCreate(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
     module: SurveyModule
-    version: int = Field(ge=1)
+    version: int | None = Field(default=None, ge=1)
     schema_json: dict[str, Any]
     is_active: bool = True
 

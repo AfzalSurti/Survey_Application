@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.database import get_db
-from app.models import AppSetting, Project, SurveyPhoto, SurveyRecord, SyncStatus, User, UserRole
+from app.models import AppSetting, Project, ProjectAssignment, SurveyPhoto, SurveyRecord, SyncStatus, User, UserRole
 from app.schemas.survey import SyncSurveyRecordRequest, SyncSurveyRecordResponse, SurveyPhotoOut
 from app.services.google_drive import upload_photo
 from app.services.google_sheets import append_or_update_record
@@ -25,6 +25,22 @@ async def _setting_value(db: AsyncSession, key: str) -> dict[str, Any]:
     return setting.value_json if setting else {}
 
 
+async def _assert_surveyor_assigned(db: AsyncSession, user: User, project_id) -> None:
+    if user.role != UserRole.surveyor:
+        return
+    assigned = await db.scalar(
+        select(ProjectAssignment.id).where(
+            ProjectAssignment.project_id == project_id,
+            ProjectAssignment.surveyor_id == user.id,
+        )
+    )
+    if assigned is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Surveyor is not assigned to this project",
+        )
+
+
 async def _get_project(
     body: SyncSurveyRecordRequest, db: AsyncSession, user: User
 ) -> Project:
@@ -32,7 +48,13 @@ async def _get_project(
         project = await db.scalar(select(Project).where(Project.id == body.project_id))
         if project is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        await _assert_surveyor_assigned(db, user, project.id)
         return project
+    if user.role == UserRole.surveyor:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Surveyors must sync with an assigned project_id",
+        )
     if body.project_number is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

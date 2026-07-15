@@ -75,6 +75,25 @@ class Project(Base):
     creator = relationship("User", back_populates="projects_created")
     pre_survey_entries = relationship("PreSurveyEntry", back_populates="project")
     survey_records = relationship("SurveyRecord", back_populates="project")
+    assignments = relationship("ProjectAssignment", back_populates="project", cascade="all, delete-orphan")
+
+
+class ProjectAssignment(Base):
+    """Maps surveyors to projects created/managed by super admin."""
+
+    __tablename__ = "project_assignments"
+    __table_args__ = (
+        UniqueConstraint("project_id", "surveyor_id", name="uq_project_surveyor"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    surveyor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    assigned_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    assigned_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    project = relationship("Project", back_populates="assignments")
+    surveyor = relationship("User", foreign_keys=[surveyor_id])
 
 
 class PreSurveyEntry(Base):

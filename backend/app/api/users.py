@@ -1,33 +1,72 @@
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_roles
 from app.core.security import hash_password
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import Project, ProjectAssignment, User, UserRole
 from app.schemas.auth import UserCreate, UserOut, UserUpdate
 
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
 
+class UserCreateWithProjects(UserCreate):
+    project_ids: list[UUID] = Field(default_factory=list)
+
+
+async def _assign_projects(
+    db: AsyncSession, surveyor_id: UUID, project_ids: list[UUID], assigned_by: UUID
+) -> None:
+    unique = list(dict.fromkeys(project_ids))
+    if not unique:
+        return
+    projects = (await db.execute(select(Project).where(Project.id.in_(unique)))).scalars().all()
+    found = {p.id for p in projects}
+    missing = [str(i) for i in unique if i not in found]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown projects: {', '.join(missing)}",
+        )
+    existing = (
+        await db.execute(select(ProjectAssignment).where(ProjectAssignment.surveyor_id == surveyor_id))
+    ).scalars().all()
+    already = {a.project_id for a in existing}
+    for pid in unique:
+        if pid not in already:
+            db.add(
+                ProjectAssignment(
+                    id=uuid4(),
+                    project_id=pid,
+                    surveyor_id=surveyor_id,
+                    assigned_by=assigned_by,
+                )
+            )
+
+
 @router.get("", response_model=list[UserOut])
 async def list_users(
+    role: UserRole | None = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(UserRole.super_admin)),
 ) -> list[User]:
-    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    query = select(User).order_by(User.created_at.desc())
+    if role is not None:
+        query = query.where(User.role == role)
+    result = await db.execute(query)
     return list(result.scalars().all())
 
 
 @router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def create_user(
-    body: UserCreate,
+    body: UserCreateWithProjects,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_roles(UserRole.super_admin)),
+    actor: User = Depends(require_roles(UserRole.super_admin)),
 ) -> User:
     existing = await db.execute(select(User).where(User.email == body.email.lower()))
     if existing.scalar_one_or_none():
@@ -43,6 +82,8 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
+    if body.role == UserRole.surveyor and body.project_ids:
+        await _assign_projects(db, user.id, body.project_ids, actor.id)
     await db.refresh(user)
     return user
 
