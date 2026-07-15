@@ -4,7 +4,7 @@ import * as Location from "expo-location";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { api, apiBaseUrl, login, logout, setApiBaseUrl } from "@/api/client";
+import { api, login, logout } from "@/api/client";
 import { addPhoto, cacheSchema, cachedSchema, dashboardCounts, getPreSurvey, records, savePreSurvey, saveRecord } from "@/db";
 import { Button, Field, GlassCard, Header, Label } from "@/components/UI";
 import { useTheme } from "@/context/ThemeContext";
@@ -21,7 +21,7 @@ function Screen({ children }: React.PropsWithChildren) { const { theme } = useTh
 
 export function LoginScreen({ navigation }: StackProps<"Login">) {
   const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [loading, setLoading] = useState(false);
-  const signIn = async () => { try { setLoading(true); await login(email, password); navigation.replace("PreSurvey"); } catch { Alert.alert("Sign in failed", "Check your credentials and API URL."); } finally { setLoading(false); } };
+  const signIn = async () => { try { setLoading(true); await login(email, password); navigation.replace("PreSurvey"); } catch { Alert.alert("Sign in failed", "Check your email and password. If this is the first open, wait a few seconds for the server to wake up."); } finally { setLoading(false); } };
   return <Screen><GlassCard><Text style={styles.hero}>Field survey, even offline.</Text><Label>Email</Label><Field value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="surveyor@gdrpl.in" /><Label>Password</Label><Field value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" /><Button title={loading ? "Signing in…" : "Sign in"} onPress={signIn} disabled={loading} /></GlassCard></Screen>;
 }
 export function PreSurveyScreen({ navigation }: StackProps<"PreSurvey">) {
@@ -112,5 +112,26 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
 export function DashboardScreen({ navigation }: TabProps<"Dashboard">) { const [counts, setCounts] = useState<{ total: number; pending: number; completed: number; photos: number }>(); const load = useCallback(() => { dashboardCounts().then(value => { if (value) setCounts(value); }); }, []); useEffect(load, [load]); return <Screen><Text style={styles.hero}>Today’s overview</Text><View style={styles.grid}>{[["Total Structures", counts?.total ?? 0], ["Pending Sync", counts?.pending ?? 0], ["Completed", counts?.completed ?? 0], ["Total Photos", counts?.photos ?? 0]].map(([label, value]) => <GlassCard key={label as string} style={styles.metric}><Text style={styles.number}>{value}</Text><Text>{label}</Text></GlassCard>)}</View><Button title="Start new survey" onPress={() => navigation.getParent()?.navigate("SurveyType")} /></Screen>; }
 export function SurveyListScreen(_: TabProps<"Surveys">) { const [list, setList] = useState<(SurveyRecord & { responses_json: string })[]>([]); const [search, setSearch] = useState(""); useEffect(() => { records().then(setList); }, []); return <Screen><Field placeholder="Search category or chainage" value={search} onChangeText={setSearch} /><FlatList scrollEnabled={false} data={list.filter(r => `${r.category} ${r.chainage}`.toLowerCase().includes(search.toLowerCase()))} keyExtractor={r => r.id} renderItem={({ item }) => <GlassCard style={styles.item}><Text style={styles.choiceText}>{item.category}</Text><Text>Chainage {item.chainage || "—"} · {item.status}</Text><Text style={styles.meta}>{item.syncStatus}</Text></GlassCard>} /></Screen>; }
 export function SyncScreen(_: TabProps<"Sync">) { const [message, setMessage] = useState("Ready to sync."); const run = async () => { setMessage("Syncing…"); const result = await syncPending(); setMessage(result.error ?? `${result.synced} record(s) synced.`); }; return <Screen><GlassCard><Text style={styles.hero}>Sync center</Text><Text style={styles.meta}>{message}</Text><Button title="Sync Now" onPress={run} /></GlassCard></Screen>; }
-export function SettingsScreen({ navigation }: TabProps<"Settings">) { const { isDark, toggleTheme } = useTheme(); const [url, setUrl] = useState(""); useEffect(() => { apiBaseUrl().then(setUrl); }, []); return <Screen><GlassCard><Text style={styles.hero}>Settings</Text><View style={styles.setting}><Text>Dark mode</Text><Switch value={isDark} onValueChange={toggleTheme} /></View><Label>API base URL</Label><Field value={url} onChangeText={setUrl} autoCapitalize="none" /><Button title="Save API URL" onPress={() => setApiBaseUrl(url)} /><View style={{ height: 12 }} /><Button title="Log out" onPress={async () => { await logout(); navigation.getParent()?.navigate("Login"); }} /></GlassCard></Screen>; }
+export function SettingsScreen({ navigation }: TabProps<"Settings">) {
+  const { isDark, toggleTheme } = useTheme();
+  return (
+    <Screen>
+      <GlassCard>
+        <Text style={styles.hero}>Settings</Text>
+        <View style={styles.setting}>
+          <Text>Dark mode</Text>
+          <Switch value={isDark} onValueChange={toggleTheme} />
+        </View>
+        <Text style={styles.meta}>Connected to GDRPL Survey cloud API.</Text>
+        <Button
+          title="Log out"
+          onPress={async () => {
+            await logout();
+            navigation.getParent()?.navigate("Login");
+          }}
+        />
+      </GlassCard>
+    </Screen>
+  );
+}
 const styles = StyleSheet.create({ screen: { flex: 1 }, content: { padding: 20, gap: 14, paddingBottom: 40 }, hero: { fontSize: 24, fontWeight: "800", color: "#1B3A5C", marginBottom: 12 }, choice: { marginBottom: 12, minHeight: 92, justifyContent: "center" }, choiceText: { color: "#1B3A5C", fontWeight: "800", fontSize: 17 }, category: { paddingVertical: 18, marginBottom: 8 }, meta: { color: "#55708C", lineHeight: 21, marginBottom: 12 }, grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 }, metric: { width: "47%", minHeight: 125, justifyContent: "center" }, number: { fontSize: 34, fontWeight: "800", color: "#1B4F8C" }, formRow: { flexDirection: "row", gap: 10 }, rail: { width: 6, backgroundColor: "rgba(111,168,62,.18)", borderRadius: 4, overflow: "hidden" }, railFill: { width: "100%", backgroundColor: "#6FA83E" }, form: { flex: 1 }, options: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 }, pill: { borderWidth: 1, borderColor: "#B8CCE1", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 }, selected: { backgroundColor: "#CFE5BA", borderColor: "#6FA83E" }, camera: { marginTop: "auto", padding: 24, gap: 12 }, item: { marginBottom: 10 }, setting: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } });
