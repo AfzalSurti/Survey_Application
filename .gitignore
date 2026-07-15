@@ -31,6 +31,11 @@ node_modules/
 dist/
 .vite/
 *.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+backend/uploads/*
+!backend/uploads/.gitkeep
+
 
 # Expo / React Native
 .expo/
