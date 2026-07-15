@@ -26,9 +26,13 @@ export type RecordItem = {
   updated_at?: string;
 };
 
+/** Production API base (Render). Local/dev uses Vite proxy `/api`. */
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
+
 const api = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
   const token = localStorage.getItem("access_token");
-  const response = await fetch(`/api${path}`, {
+  const url = `${API_BASE}/api${path}`;
+  const response = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -52,7 +56,7 @@ export const client = {
   delete: <T>(path: string) => api<T>(path, { method: "DELETE" }),
   download: async (path: string, body?: unknown, method = "GET") => {
     const token = localStorage.getItem("access_token");
-    const r = await fetch(`/api${path}`, {
+    const r = await fetch(`${API_BASE}/api${path}`, {
       method,
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),

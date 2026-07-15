@@ -8,11 +8,41 @@
     "icon": "./assets/gdrpl-logo.png",
     "userInterfaceStyle": "automatic",
     "plugins": [
-      ["expo-camera", { "cameraPermission": "Allow GDRPL Survey to capture structure photos." }],
-      ["expo-location", { "locationWhenInUsePermission": "Allow GDRPL Survey to capture survey coordinates." }],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow GDRPL Survey to capture structure photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow GDRPL Survey to capture survey coordinates."
+        }
+      ],
       "expo-secure-store"
     ],
-    "android": { "package": "com.gdrpl.survey", "adaptiveIcon": { "foregroundImage": "./assets/gdrpl-logo.png", "backgroundColor": "#DCEBFB" } },
-    "ios": { "bundleIdentifier": "com.gdrpl.survey" }
+    "android": {
+      "package": "com.gdrpl.survey",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/gdrpl-logo.png",
+        "backgroundColor": "#DCEBFB"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.gdrpl.survey"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "fdb01712-e63d-42bb-ae83-8a0a070d9305"
+      }
+    },
+    "owner": "afzal635520"
   }
 }

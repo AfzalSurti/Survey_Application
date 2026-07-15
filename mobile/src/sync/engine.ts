@@ -14,9 +14,9 @@ export async function syncPending(): Promise<{ synced: number; error?: string }>
         responses_json: responses,
         latitude: record.latitude,
         longitude: record.longitude,
-        captured_at: record.capturedAt || record.captured_at,
+        captured_at: record.captured_at,
         structure_category: record.category,
-        schema_version: record.schemaVersion || record.schema_version || 1,
+        schema_version: record.schema_version || 1,
       });
       for (const photo of await pendingPhotos(record.id)) {
         const form = new FormData();

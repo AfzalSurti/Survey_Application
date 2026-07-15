@@ -35,6 +35,8 @@ vite.config.js
 vite.config.d.ts
 backend/uploads/*
 !backend/uploads/.gitkeep
+.tools/
+web/.vercel/
 
 
 # Expo / React Native

@@ -144,9 +144,20 @@ export async function dashboardCounts() {
 }
 
 export async function pendingSync() {
-  return (await database()).getAllAsync<
-    SurveyRecord & { responses_json: string; project_id?: string; category: string }
-  >("SELECT * FROM survey_records WHERE sync_status != 'synced' AND status = 'submitted'");
+  return (await database()).getAllAsync<{
+    id: string;
+    module: string;
+    category: string;
+    chainage: string;
+    responses_json: string;
+    latitude?: number;
+    longitude?: number;
+    captured_at?: string;
+    status: string;
+    sync_status: string;
+    schema_version?: number;
+    project_id?: string;
+  }>("SELECT * FROM survey_records WHERE sync_status != 'synced' AND status = 'submitted'");
 }
 
 export async function pendingPhotos(id: string) {
