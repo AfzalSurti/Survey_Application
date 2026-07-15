@@ -2,7 +2,7 @@ import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { AppFrame } from "./components/UI";
-import { Dashboard, ExcelExport, Records, Reports, SchemaEditor, SettingsPage, Templates, UsersPage } from "./pages/Pages";
+import { Dashboard, ExcelExport, Records, Reports, SchemaEditor, SettingsPage, Templates, UsersPage, ProjectsPage } from "./pages/Pages";
 
 function Login() {
   const { user, login } = useAuth(); const navigate = useNavigate(); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
@@ -12,4 +12,4 @@ function Login() {
 }
 function Protected() { const { user, loading } = useAuth(); const location = useLocation(); if (loading) return <div className="login"><div className="glass panel">Loading GDRPL Survey…</div></div>; if (!user) return <Navigate to="/login" state={{ from: location }} replace />; return <AppFrame><Outlet /></AppFrame>; }
 function SuperAdmin({ children }: { children: ReactNode }) { const { user } = useAuth(); return user?.role === "super_admin" ? <>{children}</> : <Navigate to="/" replace />; }
-export default function App() { return <Routes><Route path="/login" element={<Login />} /><Route element={<Protected />}><Route index element={<Dashboard />} /><Route path="records" element={<Records />} /><Route path="reports" element={<Reports />} /><Route path="export" element={<ExcelExport />} /><Route path="templates" element={<Templates />} /><Route path="schema" element={<SuperAdmin><SchemaEditor /></SuperAdmin>} /><Route path="users" element={<SuperAdmin><UsersPage /></SuperAdmin>} /><Route path="settings" element={<SuperAdmin><SettingsPage /></SuperAdmin>} /></Route><Route path="*" element={<Navigate to="/" replace />} /></Routes>; }
+export default function App() { return <Routes><Route path="/login" element={<Login />} /><Route element={<Protected />}><Route index element={<Dashboard />} /><Route path="records" element={<Records />} /><Route path="reports" element={<Reports />} /><Route path="export" element={<ExcelExport />} /><Route path="templates" element={<Templates />} /><Route path="projects" element={<SuperAdmin><ProjectsPage /></SuperAdmin>} /><Route path="schema" element={<SuperAdmin><SchemaEditor /></SuperAdmin>} /><Route path="users" element={<SuperAdmin><UsersPage /></SuperAdmin>} /><Route path="settings" element={<SuperAdmin><SettingsPage /></SuperAdmin>} /></Route><Route path="*" element={<Navigate to="/" replace />} /></Routes>; }

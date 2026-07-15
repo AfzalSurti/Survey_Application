@@ -1,45 +1,581 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Download, Plus, Search, SlidersHorizontal, X } from "lucide-react";
-import { client, type RecordItem, type User } from "../api/client";
+import { Download, Plus, Search, X } from "lucide-react";
+import { client, fetchRecords, type Project, type RecordItem, type User } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { GlassPanel, StatusBadge } from "../components/UI";
 
-const Heading = ({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) => <div className="page-heading"><div><p className="eyebrow">{eyebrow}</p><h1>{title}</h1></div>{action}</div>;
-const getRecords = () => client.get<RecordItem[]>("/records").catch(() => []);
-const fmt = (v?: string) => v ? new Date(v).toLocaleDateString() : "—";
+const Heading = ({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) => (
+  <div className="page-heading">
+    <div>
+      <p className="eyebrow">{eyebrow}</p>
+      <h1>{title}</h1>
+    </div>
+    {action}
+  </div>
+);
+
+const fmt = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
+
+function RecordsTable({ records, select }: { records: RecordItem[]; select?: (r: RecordItem) => void }) {
+  return (
+    <div className="table-wrap">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Chainage</th>
+            <th>Category</th>
+            <th>Status</th>
+            <th>Submitted</th>
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((r) => (
+            <tr key={r.id} onClick={() => select?.(r)}>
+              <td className="mono">{r.chainage}</td>
+              <td>{r.structure_category}</td>
+              <td>
+                <StatusBadge status={r.status} />
+              </td>
+              <td>{fmt(r.created_at)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!records.length && <div className="empty">No survey records are available yet.</div>}
+    </div>
+  );
+}
 
 export function Dashboard() {
   const [records, setRecords] = useState<RecordItem[]>([]);
-  useEffect(() => { getRecords().then(setRecords); }, []);
-  const statuses = ["approved", "pending", "rejected", "draft"] as const;
-  return <><Heading eyebrow="Operations overview" title="Survey intelligence, at a glance" /><div className="grid stats">{statuses.map(s => <GlassPanel key={s}><div className="stat-label">{s[0].toUpperCase() + s.slice(1)} records</div><div className="stat-value">{records.filter(r => r.status === s).length}</div><StatusBadge status={s} /></GlassPanel>)}</div><div className="split" style={{ marginTop: 16 }}><GlassPanel><h2>Recent submissions</h2><RecordsTable records={records.slice(0, 6)} /></GlassPanel><GlassPanel><h2>Review completion</h2><p>Records approved by your review team.</p><div className="stat-value">{records.length ? Math.round(records.filter(r => r.status === "approved").length / records.length * 100) : 0}%</div><div style={{ height: 9, background: "#d4e3ef", borderRadius: 9 }}><div style={{ width: `${records.length ? records.filter(r => r.status === "approved").length / records.length * 100 : 0}%`, height: "100%", borderRadius: 9, background: "var(--accent-secondary)" }} /></div></GlassPanel></div></>;
+  useEffect(() => {
+    fetchRecords().then(setRecords).catch(() => setRecords([]));
+  }, []);
+  const statuses = ["approved", "submitted", "rejected", "draft"] as const;
+  return (
+    <>
+      <Heading eyebrow="Operations overview" title="Survey intelligence, at a glance" />
+      <div className="grid stats">
+        {statuses.map((s) => (
+          <GlassPanel key={s}>
+            <div className="stat-label">{s} records</div>
+            <div className="stat-value">{records.filter((r) => r.status === s).length}</div>
+            <StatusBadge status={s} />
+          </GlassPanel>
+        ))}
+      </div>
+      <div className="split" style={{ marginTop: 16 }}>
+        <GlassPanel>
+          <h2>Recent submissions</h2>
+          <RecordsTable records={records.slice(0, 6)} />
+        </GlassPanel>
+        <GlassPanel>
+          <h2>Review completion</h2>
+          <div className="stat-value">
+            {records.length ? Math.round((records.filter((r) => r.status === "approved").length / records.length) * 100) : 0}%
+          </div>
+        </GlassPanel>
+      </div>
+    </>
+  );
 }
-function RecordsTable({ records, select }: { records: RecordItem[]; select?: (r: RecordItem) => void }) { return <div className="table-wrap"><table className="table"><thead><tr><th>Reference</th><th>Respondent</th><th>Module</th><th>Submitted</th><th>Status</th></tr></thead><tbody>{records.map(r => <tr key={r.id} onClick={() => select?.(r)}><td className="mono">{r.reference || r.id.slice(0, 8)}</td><td>{r.respondent_name || "—"}</td><td>{r.module || "Survey"}</td><td>{fmt(r.created_at)}</td><td><StatusBadge status={r.status} /></td></tr>)}</tbody></table>{!records.length && <div className="empty">No survey records are available yet.</div>}</div>; }
+
 export function Records() {
-  const { user } = useAuth(); const [records, setRecords] = useState<RecordItem[]>([]); const [query, setQuery] = useState(""); const [status, setStatus] = useState("all"); const [selected, setSelected] = useState<RecordItem | null>(null);
-  useEffect(() => { getRecords().then(setRecords); }, []);
-  const filtered = useMemo(() => records.filter(r => (status === "all" || r.status === status) && JSON.stringify(r).toLowerCase().includes(query.toLowerCase())), [records, query, status]);
-  const update = async (next: "approved" | "rejected") => { if (!selected) return; try { const updated = await client.patch<RecordItem>(`/records/${selected.id}`, { status: next }); setRecords(x => x.map(r => r.id === updated.id ? updated : r)); setSelected(updated); } catch (e) { alert((e as Error).message); } };
-  return <><Heading eyebrow="Review workspace" title="Survey records" action={<span className="muted">{filtered.length} visible</span>} /><GlassPanel><div className="toolbar"><div style={{ position: "relative" }}><Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "#627b95" }} /><input className="field" style={{ paddingLeft: 32 }} placeholder="Search records" value={query} onChange={e => setQuery(e.target.value)} /></div><select className="field" value={status} onChange={e => setStatus(e.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="approved">Approved</option><option value="rejected">Rejected</option><option value="draft">Draft</option></select><button className="button secondary"><SlidersHorizontal size={15} /> Filters</button></div><RecordsTable records={filtered} select={setSelected} /></GlassPanel>{selected && <aside className="glass drawer"><button className="drawer-close" onClick={() => setSelected(null)}><X /></button><p className="eyebrow">Record details</p><h2>{selected.reference || selected.id}</h2><div style={{ margin: "12px 0" }}><StatusBadge status={selected.status} /></div>{[["Respondent", selected.respondent_name], ["Module", selected.module], ["Submitted", fmt(selected.created_at)], ["Last updated", fmt(selected.updated_at)]].map(([k,v]) => <div className="kv" key={k}><span>{k}</span><strong>{v || "—"}</strong></div>)}<h3 style={{ marginTop: 20 }}>Response data</h3><pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>{JSON.stringify(selected.answers || {}, null, 2)}</pre>{user?.role !== "surveyor" && <div className="toolbar"><button className="button" onClick={() => update("approved")}>Approve</button><button className="button danger" onClick={() => update("rejected")}>Reject</button></div>}</aside>}</>;
+  const { user } = useAuth();
+  const canCorrect = user?.role === "admin" || user?.role === "super_admin";
+  const [records, setRecords] = useState<RecordItem[]>([]);
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [selected, setSelected] = useState<RecordItem | null>(null);
+  const [editJson, setEditJson] = useState("");
+  const [editChainage, setEditChainage] = useState("");
+
+  useEffect(() => {
+    fetchRecords().then(setRecords).catch(() => setRecords([]));
+  }, []);
+  useEffect(() => {
+    if (selected) {
+      setEditJson(JSON.stringify(selected.responses_json || {}, null, 2));
+      setEditChainage(selected.chainage);
+    }
+  }, [selected]);
+
+  const filtered = useMemo(
+    () =>
+      records.filter(
+        (r) =>
+          (status === "all" || r.status === status) &&
+          JSON.stringify(r).toLowerCase().includes(query.toLowerCase()),
+      ),
+    [records, query, status],
+  );
+
+  const setStatusAction = async (next: "approved" | "rejected") => {
+    if (!selected) return;
+    try {
+      const updated = await client.patch<RecordItem>(`/records/${selected.id}/status`, { status: next });
+      setRecords((x) => x.map((r) => (r.id === updated.id ? updated : r)));
+      setSelected(updated);
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  const saveCorrections = async () => {
+    if (!selected || !canCorrect) return;
+    try {
+      const responses_json = JSON.parse(editJson);
+      const updated = await client.patch<RecordItem>(`/records/${selected.id}`, {
+        chainage: editChainage,
+        responses_json,
+      });
+      setRecords((x) => x.map((r) => (r.id === updated.id ? updated : r)));
+      setSelected(updated);
+      alert("Record data corrected.");
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  return (
+    <>
+      <Heading eyebrow="Review workspace" title="Survey records" action={<span className="muted">{filtered.length} visible</span>} />
+      <GlassPanel>
+        <div className="toolbar">
+          <div style={{ position: "relative" }}>
+            <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "#627b95" }} />
+            <input className="field" style={{ paddingLeft: 32 }} placeholder="Search records" value={query} onChange={(e) => setQuery(e.target.value)} />
+          </div>
+          <select className="field" value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="submitted">Submitted</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="draft">Draft</option>
+          </select>
+        </div>
+        <RecordsTable records={filtered} select={setSelected} />
+      </GlassPanel>
+      {selected && (
+        <aside className="glass drawer">
+          <button className="drawer-close" onClick={() => setSelected(null)}>
+            <X />
+          </button>
+          <p className="eyebrow">Record details</p>
+          <h2>{selected.chainage}</h2>
+          <div style={{ margin: "12px 0" }}>
+            <StatusBadge status={selected.status} />
+          </div>
+          <div className="kv">
+            <span>Category</span>
+            <strong>{selected.structure_category}</strong>
+          </div>
+          <div className="kv">
+            <span>Schema version</span>
+            <strong>v{selected.schema_version}</strong>
+          </div>
+          {canCorrect ? (
+            <>
+              <h3 style={{ marginTop: 20 }}>Correct data</h3>
+              <p className="muted">Admins can fix answers. Form fields/architecture are super-admin only.</p>
+              <div className="form-row">
+                <label>Chainage</label>
+                <input className="field mono" value={editChainage} onChange={(e) => setEditChainage(e.target.value)} />
+              </div>
+              <div className="form-row">
+                <label>Responses JSON</label>
+                <textarea className="field code" value={editJson} onChange={(e) => setEditJson(e.target.value)} spellCheck={false} />
+              </div>
+              <button className="button" onClick={saveCorrections}>
+                Save corrections
+              </button>
+            </>
+          ) : (
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>
+              {JSON.stringify(selected.responses_json || {}, null, 2)}
+            </pre>
+          )}
+          {canCorrect && (
+            <div className="toolbar" style={{ marginTop: 12 }}>
+              <button className="button" onClick={() => setStatusAction("approved")}>
+                Approve
+              </button>
+              <button className="button danger" onClick={() => setStatusAction("rejected")}>
+                Reject
+              </button>
+            </div>
+          )}
+        </aside>
+      )}
+    </>
+  );
 }
+
 export function Reports() {
-  const [records, setRecords] = useState<RecordItem[]>([]); const [ids, setIds] = useState<string[]>([]); const [busy, setBusy] = useState(false);
-  useEffect(() => { getRecords().then(r => setRecords(r.filter(x => x.status === "approved"))); }, []);
-  const generate = async () => { setBusy(true); try { await client.download("/reports/generate", { record_ids: ids }, "POST"); } catch (e) { alert((e as Error).message); } finally { setBusy(false); } };
-  return <><Heading eyebrow="Documentation" title="Generate a field report" action={<button className="button" disabled={!ids.length || busy} onClick={generate}><Download size={15} /> {busy ? "Generating…" : "Download DOCX"}</button>} /><GlassPanel><p>Select approved survey records to include in the report.</p><RecordsTable records={records.map(r => ({ ...r, respondent_name: `${ids.includes(r.id) ? "✓ " : ""}${r.respondent_name || "Unnamed respondent"}` }))} select={r => setIds(v => v.includes(r.id) ? v.filter(id => id !== r.id) : [...v, r.id])} /><p className="muted">{ids.length} record{ids.length === 1 ? "" : "s"} selected</p></GlassPanel></>;
+  const [records, setRecords] = useState<RecordItem[]>([]);
+  const [ids, setIds] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    fetchRecords()
+      .then((r) => setRecords(r.filter((x) => x.status === "approved")))
+      .catch(() => setRecords([]));
+  }, []);
+  const generate = async () => {
+    setBusy(true);
+    try {
+      await client.download("/reports/generate", { record_ids: ids }, "POST");
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <Heading
+        eyebrow="Documentation"
+        title="Generate a field report"
+        action={
+          <button className="button" disabled={!ids.length || busy} onClick={generate}>
+            <Download size={15} /> {busy ? "Generating…" : "Download DOCX"}
+          </button>
+        }
+      />
+      <GlassPanel>
+        <p>Select approved survey records.</p>
+        <RecordsTable records={records} select={(r) => setIds((v) => (v.includes(r.id) ? v.filter((id) => id !== r.id) : [...v, r.id]))} />
+        <p className="muted">{ids.length} selected</p>
+      </GlassPanel>
+    </>
+  );
 }
-export function ExcelExport() { const [busy, setBusy] = useState(false); return <><Heading eyebrow="Data portability" title="Excel export" /><GlassPanel><h2>Export survey data</h2><p>Download the latest record set as an Excel workbook for offline analysis and archive workflows.</p><button className="button" disabled={busy} onClick={async () => { setBusy(true); try { await client.download("/exports/excel"); } catch (e) { alert((e as Error).message); } finally { setBusy(false); } }}><Download size={15} /> {busy ? "Preparing…" : "Download .xlsx"}</button></GlassPanel></>; }
+
+export function ExcelExport() {
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <Heading eyebrow="Data portability" title="Excel export" />
+      <GlassPanel>
+        <button
+          className="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await client.download("/exports/excel");
+            } catch (e) {
+              alert((e as Error).message);
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <Download size={15} /> {busy ? "Preparing…" : "Download .xlsx"}
+        </button>
+      </GlassPanel>
+    </>
+  );
+}
+
 export function SchemaEditor() {
-  const [module, setModule] = useState("biodiversity"); const [json, setJson] = useState("{}"); const [message, setMessage] = useState("");
-  useEffect(() => { client.get<{ module: string; schema_json: object; version: number }[]>(`/schemas/active`).then(s => { const x = s.find(v => v.module === module) || s[0]; if (x) { setModule(x.module); setJson(JSON.stringify(x.schema_json, null, 2)); } }).catch(() => setMessage("No active schema could be loaded.")); }, []);
-  const save = async () => { try { const schema_json = JSON.parse(json); await client.post("/schemas", { module, schema_json }); setMessage("New schema version saved."); } catch (e) { setMessage((e as Error).message); } };
-  return <><Heading eyebrow="Super admin" title="Questionnaire schema" action={<button className="button" onClick={save}>Save new version</button>} /><GlassPanel><div className="toolbar"><select className="field" value={module} onChange={e => setModule(e.target.value)}><option value="biodiversity">Biodiversity</option><option value="livelihood">Livelihood</option><option value="infrastructure">Infrastructure</option></select><span className="muted">Changes are published as an immutable version.</span></div><textarea className="field code" value={json} onChange={e => setJson(e.target.value)} spellCheck={false} />{message && <p className="muted">{message}</p>}</GlassPanel></>;
+  const [module, setModule] = useState("structure_inventory");
+  const [json, setJson] = useState("{}");
+  const [message, setMessage] = useState("");
+  const load = () => {
+    client
+      .get<{ module: string; schema_json: object; version: number }[]>(`/schemas?module=${module}`)
+      .then((s) => {
+        const x = s[0];
+        if (x) setJson(JSON.stringify(x.schema_json, null, 2));
+        else setMessage("No schema for this module yet.");
+      })
+      .catch((e) => setMessage((e as Error).message));
+  };
+  useEffect(load, [module]);
+  const save = async () => {
+    try {
+      const schema_json = JSON.parse(json);
+      await client.post("/schemas", { module, schema_json, is_active: true });
+      setMessage("New schema version published. Surveyors will see the updated form.");
+      load();
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
+  };
+  return (
+    <>
+      <Heading eyebrow="Super admin" title="Questionnaire schema" action={<button className="button" onClick={save}>Publish new version</button>} />
+      <GlassPanel>
+        <p className="muted">Only super admin can add/remove/reorder questions. Admin cannot change form architecture.</p>
+        <div className="toolbar">
+          <select className="field" value={module} onChange={(e) => setModule(e.target.value)}>
+            <option value="structure_inventory">Structure Inventory</option>
+            <option value="utility_shifting">Utility Shifting</option>
+          </select>
+        </div>
+        <textarea className="field code" value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} />
+        {message && <p className="muted">{message}</p>}
+      </GlassPanel>
+    </>
+  );
 }
+
 export function UsersPage() {
-  const [users, setUsers] = useState<User[]>([]); const [form, setForm] = useState({ name: "", email: "", password: "", role: "surveyor" });
-  useEffect(() => { client.get<User[]>("/users").then(setUsers).catch(() => {}); }, []);
-  const add = async () => { try { const u = await client.post<User>("/users", form); setUsers([u, ...users]); setForm({ name: "", email: "", password: "", role: "surveyor" }); } catch (e) { alert((e as Error).message); } };
-  return <><Heading eyebrow="Super admin" title="Team access" /><div className="split"><GlassPanel><h2>Invite a user</h2>{(["name", "email", "password"] as const).map(k => <div className="form-row" key={k}><label>{k[0].toUpperCase() + k.slice(1)}</label><input className="field" type={k === "password" ? "password" : k === "email" ? "email" : "text"} value={form[k]} onChange={e => setForm({ ...form, [k]: e.target.value })} /></div>)}<div className="form-row"><label>Role</label><select className="field" value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}><option>surveyor</option><option>admin</option><option>super_admin</option></select></div><button className="button" onClick={add}><Plus size={15} /> Create user</button></GlassPanel><GlassPanel><h2>Directory</h2><RecordsTable records={users.map(u => ({ id: u.id, reference: u.email, respondent_name: u.name, module: u.role, status: u.is_active ? "approved" : "draft" }))} /></GlassPanel></div></>;
+  const [users, setUsers] = useState<User[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "surveyor", project_ids: [] as string[] });
+  useEffect(() => {
+    client.get<User[]>("/users").then(setUsers).catch(() => {});
+    client.get<Project[]>("/projects").then(setProjects).catch(() => {});
+  }, []);
+  const toggleProject = (id: string) =>
+    setForm((f) => ({
+      ...f,
+      project_ids: f.project_ids.includes(id) ? f.project_ids.filter((x) => x !== id) : [...f.project_ids, id],
+    }));
+  const add = async () => {
+    try {
+      const u = await client.post<User>("/users", {
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        role: form.role,
+        project_ids: form.role === "surveyor" ? form.project_ids : [],
+      });
+      setUsers([u, ...users]);
+      setForm({ name: "", email: "", password: "", role: "surveyor", project_ids: [] });
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+  return (
+    <>
+      <Heading eyebrow="Super admin" title="Team access" />
+      <div className="split">
+        <GlassPanel>
+          <h2>Create user</h2>
+          {(["name", "email", "password"] as const).map((k) => (
+            <div className="form-row" key={k}>
+              <label>{k[0].toUpperCase() + k.slice(1)}</label>
+              <input
+                className="field"
+                type={k === "password" ? "password" : k === "email" ? "email" : "text"}
+                value={form[k]}
+                onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+              />
+            </div>
+          ))}
+          <div className="form-row">
+            <label>Role</label>
+            <select className="field" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+              <option value="surveyor">surveyor</option>
+              <option value="admin">admin</option>
+              <option value="super_admin">super_admin</option>
+            </select>
+          </div>
+          {form.role === "surveyor" && (
+            <div className="form-row">
+              <label>Assign projects (optional)</label>
+              <div style={{ display: "grid", gap: 6 }}>
+                {projects.map((p) => (
+                  <label key={p.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input type="checkbox" checked={form.project_ids.includes(p.id)} onChange={() => toggleProject(p.id)} />
+                    <span>
+                      {p.name} <span className="mono muted">({p.project_number})</span>
+                    </span>
+                  </label>
+                ))}
+                {!projects.length && <span className="muted">Create a project first, or assign later in Projects.</span>}
+              </div>
+            </div>
+          )}
+          <button className="button" onClick={add}>
+            <Plus size={15} /> Create user
+          </button>
+        </GlassPanel>
+        <GlassPanel>
+          <h2>Directory</h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id}>
+                    <td>{u.name}</td>
+                    <td className="mono">{u.email}</td>
+                    <td>{u.role}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </GlassPanel>
+      </div>
+    </>
+  );
 }
-export function SettingsPage() { const [settings, setSettings] = useState(() => JSON.parse(localStorage.getItem("gdrpl-settings") || '{"minPhotos":2,"syncInterval":15,"googleProject":""}')); const save = () => { localStorage.setItem("gdrpl-settings", JSON.stringify(settings)); alert("Settings saved locally. Connect a settings API to sync globally."); }; return <><Heading eyebrow="Super admin" title="Application settings" /><GlassPanel><div className="form-row"><label>Minimum required photos</label><input className="field" type="number" value={settings.minPhotos} onChange={e => setSettings({ ...settings, minPhotos: +e.target.value })} /></div><div className="form-row"><label>Mobile sync interval (minutes)</label><input className="field" type="number" value={settings.syncInterval} onChange={e => setSettings({ ...settings, syncInterval: +e.target.value })} /></div><div className="form-row"><label>Google Cloud project ID</label><input className="field" placeholder="Placeholder configuration" value={settings.googleProject} onChange={e => setSettings({ ...settings, googleProject: e.target.value })} /></div><button className="button" onClick={save}>Save settings</button></GlassPanel></>; }
-export function Templates() { return <><Heading eyebrow="Documentation" title="Report templates" /><GlassPanel><h2>Template library</h2><p>Report template management will be available here. Generated reports currently use the configured server-side default.</p></GlassPanel></>; }
+
+export function ProjectsPage() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [surveyors, setSurveyors] = useState<User[]>([]);
+  const [form, setForm] = useState({ name: "", project_number: "", highway_number: "", surveyor_ids: [] as string[] });
+  const [selected, setSelected] = useState<Project | null>(null);
+  const [assignIds, setAssignIds] = useState<string[]>([]);
+
+  const reload = () => {
+    client.get<Project[]>("/projects").then(setProjects).catch(() => setProjects([]));
+    client.get<User[]>("/users?role=surveyor").then(setSurveyors).catch(() => setSurveyors([]));
+  };
+  useEffect(reload, []);
+
+  const toggle = (ids: string[], id: string, set: (v: string[]) => void) =>
+    set(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
+
+  const create = async () => {
+    try {
+      await client.post("/projects", form);
+      setForm({ name: "", project_number: "", highway_number: "", surveyor_ids: [] });
+      reload();
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  const openAssign = (p: Project) => {
+    setSelected(p);
+    setAssignIds(p.surveyor_ids || []);
+  };
+
+  const saveAssign = async () => {
+    if (!selected) return;
+    try {
+      const updated = await client.put<Project>(`/projects/${selected.id}/assignments`, { surveyor_ids: assignIds });
+      setProjects((list) => list.map((p) => (p.id === updated.id ? updated : p)));
+      setSelected(updated);
+      alert("Assignments updated.");
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  return (
+    <>
+      <Heading eyebrow="Super admin" title="Projects & surveyor assignment" />
+      <div className="split">
+        <GlassPanel>
+          <h2>Create project</h2>
+          {(["name", "project_number", "highway_number"] as const).map((k) => (
+            <div className="form-row" key={k}>
+              <label>{k.replace("_", " ")}</label>
+              <input className="field" value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
+            </div>
+          ))}
+          <div className="form-row">
+            <label>Assign surveyors now (optional)</label>
+            {surveyors.map((s) => (
+              <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input type="checkbox" checked={form.surveyor_ids.includes(s.id)} onChange={() => toggle(form.surveyor_ids, s.id, (v) => setForm({ ...form, surveyor_ids: v }))} />
+                {s.name} <span className="muted mono">({s.email})</span>
+              </label>
+            ))}
+          </div>
+          <button className="button" onClick={create}>
+            <Plus size={15} /> Create project
+          </button>
+        </GlassPanel>
+        <GlassPanel>
+          <h2>All projects</h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Number</th>
+                  <th>Highway</th>
+                  <th>Surveyors</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projects.map((p) => (
+                  <tr key={p.id} onClick={() => openAssign(p)}>
+                    <td>{p.name}</td>
+                    <td className="mono">{p.project_number}</td>
+                    <td>{p.highway_number}</td>
+                    <td>{p.surveyor_ids?.length || 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {selected && (
+            <div style={{ marginTop: 16 }}>
+              <h3>Assign surveyors — {selected.name}</h3>
+              {surveyors.map((s) => (
+                <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                  <input type="checkbox" checked={assignIds.includes(s.id)} onChange={() => toggle(assignIds, s.id, setAssignIds)} />
+                  {s.name} ({s.email})
+                </label>
+              ))}
+              <button className="button" onClick={saveAssign}>
+                Save assignments
+              </button>
+            </div>
+          )}
+        </GlassPanel>
+      </div>
+    </>
+  );
+}
+
+export function SettingsPage() {
+  const [settings, setSettings] = useState(() =>
+    JSON.parse(localStorage.getItem("gdrpl-settings") || '{"minPhotos":4,"syncInterval":15,"googleProject":""}'),
+  );
+  const save = async () => {
+    try {
+      await client.patch("/settings", {
+        min_photo_count: { value: settings.minPhotos },
+        sync_interval_minutes: { value: settings.syncInterval },
+      });
+      localStorage.setItem("gdrpl-settings", JSON.stringify(settings));
+      alert("Settings saved.");
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+  return (
+    <>
+      <Heading eyebrow="Super admin" title="Application settings" />
+      <GlassPanel>
+        <div className="form-row">
+          <label>Minimum required photos</label>
+          <input className="field" type="number" value={settings.minPhotos} onChange={(e) => setSettings({ ...settings, minPhotos: +e.target.value })} />
+        </div>
+        <div className="form-row">
+          <label>Mobile sync interval (minutes)</label>
+          <input className="field" type="number" value={settings.syncInterval} onChange={(e) => setSettings({ ...settings, syncInterval: +e.target.value })} />
+        </div>
+        <button className="button" onClick={save}>
+          Save settings
+        </button>
+      </GlassPanel>
+    </>
+  );
+}
+
+export function Templates() {
+  return (
+    <>
+      <Heading eyebrow="Documentation" title="Report templates" />
+      <GlassPanel>
+        <p>Report template management uses the server DOCX template. Super admin can replace it via settings/upload in a later pass.</p>
+      </GlassPanel>
+    </>
+  );
+}
