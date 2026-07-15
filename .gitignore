@@ -1,0 +1,57 @@
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+credentials.json
+service-account*.json
+token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+backend/.venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Expo / React Native
+.expo/
+android/app/build/
+ios/build/
+*.jks
+*.mobileprovision
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local extracts / temp
+questions_extracted.txt
+*.log
+uploads/
+tmp/
+.media/
+
+# Alembic local overrides
+alembic.ini.local
