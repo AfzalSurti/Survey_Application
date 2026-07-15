@@ -8,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, require_roles
 from app.database import get_db
 from app.models import SurveyRecord, SurveyStatus, User, UserRole
-from app.schemas.survey import SurveyRecordOut, SurveyRecordPage, SurveyRecordStatusUpdate
+from app.schemas.survey import (
+    SurveyRecordDataUpdate,
+    SurveyRecordOut,
+    SurveyRecordPage,
+    SurveyRecordStatusUpdate,
+)
 
 
 router = APIRouter(prefix="/api/records", tags=["records"])
@@ -109,6 +114,39 @@ async def update_record_status(
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Survey record not found")
     record.status = body.status
+    await db.flush()
+    await db.refresh(record)
+    return record
+
+
+@router.patch("/{record_id}", response_model=SurveyRecordOut)
+async def correct_record_data(
+    record_id: UUID,
+    body: SurveyRecordDataUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.admin, UserRole.super_admin)),
+) -> SurveyRecord:
+    """Correct survey answer data. Does not change questionnaire schema/architecture."""
+    result = await db.execute(select(SurveyRecord).where(SurveyRecord.id == record_id))
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Survey record not found")
+
+    if body.chainage is not None:
+        record.chainage = body.chainage
+    if body.structure_category is not None:
+        record.structure_category = body.structure_category
+    if body.responses_json is not None:
+        record.responses_json = body.responses_json
+    if body.latitude is not None:
+        record.latitude = body.latitude
+    if body.longitude is not None:
+        record.longitude = body.longitude
+    if body.captured_at is not None:
+        record.captured_at = body.captured_at
+    if body.status is not None:
+        record.status = body.status
+
     await db.flush()
     await db.refresh(record)
     return record

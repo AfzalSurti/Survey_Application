@@ -53,10 +53,19 @@ async def create_schema_version(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.super_admin)),
 ) -> SchemaOut:
+    version = body.version
+    if version is None:
+        latest = await db.scalar(
+            select(QuestionnaireSchema.version)
+            .where(QuestionnaireSchema.module == body.module)
+            .order_by(QuestionnaireSchema.version.desc())
+            .limit(1)
+        )
+        version = (latest or 0) + 1
     existing = await db.scalar(
         select(QuestionnaireSchema).where(
             QuestionnaireSchema.module == body.module,
-            QuestionnaireSchema.version == body.version,
+            QuestionnaireSchema.version == version,
         )
     )
     if existing is not None:
@@ -70,7 +79,13 @@ async def create_schema_version(
         )
         for row in active.scalars():
             row.is_active = False
-    schema = QuestionnaireSchema(**body.model_dump(), created_by=user.id)
+    schema = QuestionnaireSchema(
+        module=body.module,
+        version=version,
+        schema_json=body.schema_json,
+        is_active=body.is_active,
+        created_by=user.id,
+    )
     db.add(schema)
     await db.flush()
     await db.refresh(schema)
