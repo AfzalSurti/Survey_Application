@@ -25,11 +25,77 @@ export function LoginScreen({ navigation }: StackProps<"Login">) {
   return <Screen><GlassCard><Text style={styles.hero}>Field survey, even offline.</Text><Label>Email</Label><Field value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="surveyor@gdrpl.in" /><Label>Password</Label><Field value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" /><Button title={loading ? "Signing in…" : "Sign in"} onPress={signIn} disabled={loading} /></GlassCard></Screen>;
 }
 export function PreSurveyScreen({ navigation }: StackProps<"PreSurvey">) {
-  const [values, setValues] = useState({ headSurveyor: "", organization: "", projectName: "", projectNumber: "", highwayNumber: "" });
-  useEffect(() => { getPreSurvey().then(row => { if (row) setValues({ headSurveyor: row.head_surveyor, organization: row.organization, projectName: row.project_name, projectNumber: row.project_number, highwayNumber: row.highway_number }); }); }, []);
-  const update = (key: keyof typeof values) => (value: string) => setValues(v => ({ ...v, [key]: value }));
-  const save = async () => { if (Object.values(values).some(v => !v.trim())) return Alert.alert("Complete all fields"); await savePreSurvey(values); navigation.replace("Main"); };
-  return <Screen><GlassCard><Text style={styles.hero}>Project briefing</Text>{([["headSurveyor", "Head Surveyor"], ["organization", "Organization"], ["projectName", "Project Name"], ["projectNumber", "Project Number"], ["highwayNumber", "Highway Number"]] as const).map(([key, label]) => <View key={key}><Label>{label}</Label><Field value={values[key]} onChangeText={update(key)} /></View>)}<Button title="Save project details" onPress={save} /></GlassCard></Screen>;
+  const [projects, setProjects] = useState<{ id: string; name: string; project_number: string; highway_number: string }[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [values, setValues] = useState({ headSurveyor: "", organization: "" });
+  useEffect(() => {
+    (async () => {
+      const saved = await getPreSurvey();
+      if (saved) {
+        setValues({ headSurveyor: saved.head_surveyor || "", organization: saved.organization || "" });
+        if (saved.project_id) setProjectId(saved.project_id);
+      }
+      try {
+        const { data } = await api.get("/api/projects");
+        setProjects(data);
+        if (!projectId && data[0]) setProjectId(data[0].id);
+      } catch {
+        Alert.alert("Projects", "Could not load assigned projects. Connect once so your assignments sync.");
+      }
+    })();
+  }, []);
+  const selected = projects.find((p) => p.id === projectId);
+  const save = async () => {
+    if (!projectId || !selected) return Alert.alert("Select an assigned project");
+    if (!values.headSurveyor.trim() || !values.organization.trim()) return Alert.alert("Complete all fields");
+    await savePreSurvey({
+      headSurveyor: values.headSurveyor,
+      organization: values.organization,
+      projectId: selected.id,
+      projectName: selected.name,
+      projectNumber: selected.project_number,
+      highwayNumber: selected.highway_number,
+    });
+    try {
+      await api.post("/api/pre-survey", {
+        project_id: selected.id,
+        head_surveyor_name: values.headSurveyor,
+        organization: values.organization,
+      });
+    } catch {
+      /* offline ok */
+    }
+    navigation.replace("Main");
+  };
+  return (
+    <Screen>
+      <GlassCard>
+        <Text style={styles.hero}>Assigned project</Text>
+        <Text style={styles.meta}>Only projects assigned by super admin appear here.</Text>
+        <Label>Project</Label>
+        <View style={styles.options}>
+          {projects.map((p) => (
+            <Pressable key={p.id} onPress={() => setProjectId(p.id)} style={[styles.pill, projectId === p.id && styles.selected]}>
+              <Text>
+                {p.name} ({p.project_number})
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        {!projects.length && <Text style={styles.meta}>No assigned projects yet.</Text>}
+        <Label>Head Surveyor</Label>
+        <Field value={values.headSurveyor} onChangeText={(v) => setValues((s) => ({ ...s, headSurveyor: v }))} />
+        <Label>Organization</Label>
+        <Field value={values.organization} onChangeText={(v) => setValues((s) => ({ ...s, organization: v }))} />
+        {selected && (
+          <Text style={styles.meta}>
+            Highway: {selected.highway_number}
+          </Text>
+        )}
+        <Button title="Continue" onPress={save} />
+      </GlassCard>
+    </Screen>
+  );
 }
 export function SurveyTypeScreen({ navigation }: StackProps<"SurveyType">) { return <Screen><Text style={styles.hero}>Choose survey type</Text>{[["structure_inventory", "Structure Inventory"], ["utility_shifting", "Utility Shifting"]].map(([module, title]) => <Pressable key={module} onPress={() => navigation.navigate("Category", { module })}><GlassCard style={styles.choice}><Text style={styles.choiceText}>{title}</Text><Text>Start a new field record →</Text></GlassCard></Pressable>)}</Screen>; }
 export function CategoryScreen({ navigation, route }: StackProps<"Category">) { const { module } = route.params; return <Screen><Text style={styles.hero}>Structure category</Text>{categories.map(category => <Pressable key={category} onPress={() => navigation.navigate("DynamicForm", { module, category })}><GlassCard style={styles.category}><Text style={styles.choiceText}>{category}</Text></GlassCard></Pressable>)}</Screen>; }
