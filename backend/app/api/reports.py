@@ -7,9 +7,10 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.templates import resolve_template_bytes, write_temp_docx
 from app.core.deps import get_current_user
 from app.database import get_db
-from app.models import ReportTemplate, SurveyRecord, User, UserRole
+from app.models import SurveyModule, SurveyRecord, User, UserRole
 from app.schemas.survey import GenerateReportRequest
 
 
@@ -43,24 +44,25 @@ async def generate_report(
 
     output = tempfile.NamedTemporaryFile(prefix="gdrpl-report-", suffix=".docx", delete=False)
     output.close()
-    template = await db.scalar(
-        select(ReportTemplate)
-        .where(ReportTemplate.is_active.is_(True))
-        .order_by(ReportTemplate.created_at.desc())
-        .limit(1)
-    )
-    default_template = Path(__file__).resolve().parents[2] / "templates" / "structure_inventory_report.docx"
-    template_path = None
-    if template and Path(template.template_docx_path).is_file():
-        template_path = Path(template.template_docx_path)
-    elif default_template.is_file():
-        template_path = default_template
 
-    if template_path is not None:
+    primary = records[0]
+    category = (primary.structure_category or "").lower()
+    module = (
+        SurveyModule.utility_shifting
+        if "utility" in category
+        else SurveyModule.structure_inventory
+    )
+
+    docx_bytes, template_path = await resolve_template_bytes(db, module=module)
+    temp_tpl: str | None = None
+    if docx_bytes and (template_path is None or not template_path.is_file()):
+        temp_tpl = write_temp_docx(docx_bytes)
+        template_path = Path(temp_tpl)
+
+    if template_path is not None and template_path.is_file():
         from docxtpl import DocxTemplate
 
         document = DocxTemplate(str(template_path))
-        primary = records[0]
         observations = "\n\n".join(
             f"{r.chainage}: {_response_value(r.responses_json, 'observations_recommendations') or _response_value(r.responses_json, 'observations') or '—'}"
             for r in records
@@ -97,6 +99,8 @@ async def generate_report(
             )
         document.save(output.name)
 
+    if temp_tpl:
+        background_tasks.add_task(_remove_file, temp_tpl)
     background_tasks.add_task(_remove_file, output.name)
     return FileResponse(
         output.name,
