@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Download, Plus, Search, X } from "lucide-react";
 import { client, fetchRecords, type Project, type RecordItem, type User } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { GlassPanel, StatusBadge } from "../components/UI";
+import { ActionButton, GlassPanel, StatusBadge } from "../components/UI";
 
 const Heading = ({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) => (
   <div className="page-heading">
@@ -122,7 +122,18 @@ export function Records() {
   };
 
   const saveCorrections = async () => {
-    if (!selected || !canCorrect) return;
+    if (!selected) {
+      alert("Select a survey record first before saving corrections.");
+      return;
+    }
+    if (!canCorrect) {
+      alert("Only admin or super admin can correct survey answers. Your role cannot edit record data.");
+      return;
+    }
+    if (!editChainage.trim()) {
+      alert("Chainage cannot be empty.");
+      return;
+    }
     try {
       const responses_json = JSON.parse(editJson);
       const updated = await client.patch<RecordItem>(`/records/${selected.id}`, {
@@ -133,7 +144,7 @@ export function Records() {
       setSelected(updated);
       alert("Record data corrected.");
     } catch (e) {
-      alert((e as Error).message);
+      alert((e as Error).message || "Could not save corrections. Check that Responses JSON is valid.");
     }
   };
 
@@ -236,9 +247,17 @@ export function Reports() {
         eyebrow="Documentation"
         title="Generate a field report"
         action={
-          <button className="button" disabled={!ids.length || busy} onClick={generate}>
+          <ActionButton
+            disabled={!ids.length || busy}
+            disabledReason={
+              busy
+                ? "Report generation is already running. Please wait."
+                : "Select at least one approved survey record in the table before downloading a DOCX report."
+            }
+            onClick={generate}
+          >
             <Download size={15} /> {busy ? "Generating…" : "Download DOCX"}
-          </button>
+          </ActionButton>
         }
       />
       <GlassPanel>
@@ -256,22 +275,22 @@ export function ExcelExport() {
     <>
       <Heading eyebrow="Data portability" title="Excel export" />
       <GlassPanel>
-        <button
-          className="button"
+        <ActionButton
           disabled={busy}
+          disabledReason="Excel export is already preparing. Please wait."
           onClick={async () => {
             setBusy(true);
             try {
               await client.download("/exports/excel");
             } catch (e) {
-              alert((e as Error).message);
+              alert((e as Error).message || "Excel export failed. Check your connection and try again.");
             } finally {
               setBusy(false);
             }
           }}
         >
           <Download size={15} /> {busy ? "Preparing…" : "Download .xlsx"}
-        </button>
+        </ActionButton>
       </GlassPanel>
     </>
   );
@@ -334,6 +353,16 @@ export function UsersPage() {
       project_ids: f.project_ids.includes(id) ? f.project_ids.filter((x) => x !== id) : [...f.project_ids, id],
     }));
   const add = async () => {
+    if (!form.name.trim() || !form.email.trim() || !form.password.trim()) {
+      alert("Name, email, and password are required to create a user.");
+      return;
+    }
+    if (form.role === "surveyor" && !form.project_ids.length) {
+      const ok = window.confirm(
+        "This surveyor has no assigned projects. They will not see any project on mobile until you assign one. Create anyway?",
+      );
+      if (!ok) return;
+    }
     try {
       const u = await client.post<User>("/users", {
         name: form.name,
@@ -345,7 +374,7 @@ export function UsersPage() {
       setUsers([u, ...users]);
       setForm({ name: "", email: "", password: "", role: "surveyor", project_ids: [] });
     } catch (e) {
-      alert((e as Error).message);
+      alert((e as Error).message || "Could not create user. The email may already exist.");
     }
   };
   return (
@@ -438,12 +467,16 @@ export function ProjectsPage() {
     set(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
 
   const create = async () => {
+    if (!form.name.trim() || !form.project_number.trim() || !form.highway_number.trim()) {
+      alert("Project name, project number, and highway number are all required.");
+      return;
+    }
     try {
       await client.post("/projects", form);
       setForm({ name: "", project_number: "", highway_number: "", surveyor_ids: [] });
       reload();
     } catch (e) {
-      alert((e as Error).message);
+      alert((e as Error).message || "Could not create project.");
     }
   };
 
