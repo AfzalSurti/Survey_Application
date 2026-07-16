@@ -109,7 +109,7 @@ export default function App() {
         <Route path="records" element={<Records />} />
         <Route path="reports" element={<Reports />} />
         <Route path="export" element={<ExcelExport />} />
-        <Route path="templates" element={<Templates />} />
+        <Route path="templates" element={<SuperAdmin><Templates /></SuperAdmin>} />
         <Route path="projects" element={<SuperAdmin><ProjectsPage /></SuperAdmin>} />
         <Route path="schema" element={<SuperAdmin><SchemaEditor /></SuperAdmin>} />
         <Route path="users" element={<SuperAdmin><UsersPage /></SuperAdmin>} />

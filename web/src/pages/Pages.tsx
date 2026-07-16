@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Download, Plus, Search, X } from "lucide-react";
-import { client, fetchRecords, type Project, type RecordItem, type User } from "../api/client";
+import { client, fetchRecords, type Project, type RecordItem, type ReportTemplate, type User } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ActionButton, GlassPanel, StatusBadge } from "../components/UI";
 
@@ -603,12 +603,205 @@ export function SettingsPage() {
 }
 
 export function Templates() {
+  const { user } = useAuth();
+  const isSuper = user?.role === "super_admin";
+  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState("");
+  const [module, setModule] = useState<"structure_inventory" | "utility_shifting">("structure_inventory");
+  const [activate, setActivate] = useState(true);
+  const [file, setFile] = useState<File | null>(null);
+
+  const load = () =>
+    client
+      .get<ReportTemplate[]>("/templates")
+      .then(setTemplates)
+      .catch((e) => setMessage((e as Error).message));
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const upload = async () => {
+    if (!isSuper) {
+      alert("Only super admin can upload report templates.");
+      return;
+    }
+    if (!name.trim()) {
+      alert("Enter a template name before uploading.");
+      return;
+    }
+    if (!file) {
+      alert("Choose a .docx file to upload.");
+      return;
+    }
+    if (!file.name.toLowerCase().endsWith(".docx")) {
+      alert("Only .docx Word templates are supported.");
+      return;
+    }
+    setBusy(true);
+    setMessage("");
+    try {
+      const form = new FormData();
+      form.append("name", name.trim());
+      form.append("module", module);
+      form.append("activate", String(activate));
+      form.append("file", file);
+      await client.upload("/templates", form);
+      setName("");
+      setFile(null);
+      setMessage("Template uploaded. Report generation will use the active template for that module.");
+      await load();
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const activateTpl = async (t: ReportTemplate) => {
+    if (!isSuper) {
+      alert("Only super admin can activate templates.");
+      return;
+    }
+    try {
+      await client.post(`/templates/${t.id}/activate`);
+      setMessage(`“${t.name}” is now active for ${t.module.replace("_", " ")}.`);
+      await load();
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  const removeTpl = async (t: ReportTemplate) => {
+    if (!isSuper) {
+      alert("Only super admin can delete templates.");
+      return;
+    }
+    if (t.is_builtin) {
+      alert("The built-in default template cannot be deleted.");
+      return;
+    }
+    if (t.is_active) {
+      alert("Activate another template first, then delete this one. The active template cannot be removed.");
+      return;
+    }
+    if (!window.confirm(`Delete template “${t.name}”? This cannot be undone.`)) return;
+    try {
+      await client.delete(`/templates/${t.id}`);
+      setMessage("Template deleted.");
+      await load();
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
   return (
     <>
       <Heading eyebrow="Documentation" title="Report templates" />
-      <GlassPanel>
-        <p>Report template management uses the server DOCX template. Super admin can replace it via settings/upload in a later pass.</p>
-      </GlassPanel>
+      <div className="split">
+        <GlassPanel>
+          <h2>Upload DOCX template</h2>
+          <p className="muted">
+            Uploaded templates are stored in the database and used by <strong>Report generation</strong>. Use{" "}
+            <code className="mono">{"{{ project_name }}"}</code>, <code className="mono">{"{{ chainage }}"}</code>,{" "}
+            <code className="mono">{"{{ structure_category }}"}</code>, <code className="mono">{"{{ observations }}"}</code>,{" "}
+            <code className="mono">{"{{ recommendations }}"}</code> placeholders in Word.
+          </p>
+          {!isSuper ? (
+            <p className="notice">View-only: ask a super admin to upload or activate templates.</p>
+          ) : (
+            <>
+              <div className="form-row">
+                <label>Template name</label>
+                <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. NH structure report v2" />
+              </div>
+              <div className="form-row">
+                <label>Module</label>
+                <select className="field" value={module} onChange={(e) => setModule(e.target.value as typeof module)}>
+                  <option value="structure_inventory">Structure Inventory</option>
+                  <option value="utility_shifting">Utility Survey</option>
+                </select>
+              </div>
+              <div className="form-row">
+                <label>DOCX file</label>
+                <input
+                  className="field"
+                  type="file"
+                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+                <input type="checkbox" checked={activate} onChange={(e) => setActivate(e.target.checked)} />
+                Activate immediately for this module
+              </label>
+              <ActionButton
+                disabled={busy}
+                disabledReason="Upload is already in progress. Please wait."
+                onClick={upload}
+              >
+                {busy ? "Uploading…" : "Upload template"}
+              </ActionButton>
+            </>
+          )}
+          {message && <p className="muted" style={{ marginTop: 12 }}>{message}</p>}
+        </GlassPanel>
+        <GlassPanel>
+          <h2>Available templates</h2>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Module</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {templates.map((t) => (
+                  <tr key={t.id} style={{ cursor: "default" }}>
+                    <td>
+                      <strong>{t.name}</strong>
+                      <div className="muted mono">{t.file_name}</div>
+                    </td>
+                    <td>{t.module.replace(/_/g, " ")}</td>
+                    <td>{t.is_active ? <span className="badge approved">active</span> : <span className="muted">inactive</span>}</td>
+                    <td>
+                      <div className="toolbar" style={{ marginBottom: 0 }}>
+                        <ActionButton
+                          className="button secondary"
+                          disabled={t.is_active}
+                          disabledReason="This template is already active for its module."
+                          onClick={() => activateTpl(t)}
+                        >
+                          Activate
+                        </ActionButton>
+                        <button className="button secondary" type="button" onClick={() => client.download(`/templates/${t.id}/download`).catch((e) => alert((e as Error).message))}>
+                          Download
+                        </button>
+                        {!t.is_builtin && (
+                          <ActionButton
+                            className="button danger"
+                            disabled={t.is_active}
+                            disabledReason="Activate another template first, then delete this one."
+                            onClick={() => removeTpl(t)}
+                          >
+                            Delete
+                          </ActionButton>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!templates.length && <div className="empty">No templates loaded yet.</div>}
+          </div>
+        </GlassPanel>
+      </div>
     </>
   );
 }

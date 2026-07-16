@@ -48,12 +48,39 @@ const api = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
   return response.status === 204 ? (undefined as T) : response.json();
 };
 
+export type ReportTemplate = {
+  id: string;
+  name: string;
+  module: "structure_inventory" | "utility_shifting";
+  is_active: boolean;
+  created_at?: string | null;
+  file_name?: string | null;
+  has_file: boolean;
+  is_builtin: boolean;
+};
+
 export const client = {
   get: <T>(path: string) => api<T>(path),
   post: <T>(path: string, body?: unknown) => api<T>(path, { method: "POST", body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) => api<T>(path, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(path: string, body: unknown) => api<T>(path, { method: "PATCH", body: JSON.stringify(body) }),
   delete: <T>(path: string) => api<T>(path, { method: "DELETE" }),
+  upload: async <T>(path: string, form: FormData): Promise<T> => {
+    const token = localStorage.getItem("access_token");
+    const response = await fetch(`${API_BASE}/api${path}`, {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: form,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      const detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail || body);
+      throw new Error(detail || `Upload failed (${response.status})`);
+    }
+    return response.status === 204 ? (undefined as T) : response.json();
+  },
   download: async (path: string, body?: unknown, method = "GET") => {
     const token = localStorage.getItem("access_token");
     const r = await fetch(`${API_BASE}/api${path}`, {
@@ -64,7 +91,11 @@ export const client = {
       },
       body: body ? JSON.stringify(body) : undefined,
     });
-    if (!r.ok) throw new Error("Download could not be generated.");
+    if (!r.ok) {
+      const errBody = await r.json().catch(() => ({}));
+      const detail = typeof errBody.detail === "string" ? errBody.detail : "Download could not be generated.";
+      throw new Error(detail);
+    }
     const link = Object.assign(document.createElement("a"), {
       href: URL.createObjectURL(await r.blob()),
       download: r.headers.get("content-disposition")?.match(/filename="?([^"]+)/)?.[1] || "gdrpl-export",

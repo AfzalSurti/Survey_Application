@@ -15,9 +15,9 @@ const entries = [
   { to: "/app/records", label: "Records", icon: ClipboardList },
   { to: "/app/reports", label: "Report generation", icon: FileText },
   { to: "/app/export", label: "Excel export", icon: FileSpreadsheet },
-  { to: "/app/templates", label: "Templates", icon: Layers },
 ];
 const superAdminEntries = [
+  { to: "/app/templates", label: "Templates", icon: Layers },
   { to: "/app/projects", label: "Projects", icon: FolderKanban },
   { to: "/app/schema", label: "Schema editor", icon: Braces },
   { to: "/app/users", label: "Users", icon: Users },
