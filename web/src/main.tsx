@@ -3,8 +3,17 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./auth/AuthContext";
+import { ServerGate } from "./components/ServerGate";
 import "./styles/global.css";
 
 createRoot(document.getElementById("root")!).render(
-  <StrictMode><BrowserRouter><AuthProvider><App /></AuthProvider></BrowserRouter></StrictMode>,
+  <StrictMode>
+    <BrowserRouter>
+      <ServerGate>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </ServerGate>
+    </BrowserRouter>
+  </StrictMode>,
 );

@@ -2,6 +2,8 @@ import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from "react
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "./auth/AuthContext";
 import { AppFrame } from "./components/UI";
+import { ServerWakeScreen } from "./components/ServerWakeScreen";
+import { wakeServer } from "./lib/wakeServer";
 import { LandingPage } from "./pages/Landing";
 import { Dashboard, ExcelExport, Records, Reports, SchemaEditor, SettingsPage, Templates, UsersPage, ProjectsPage } from "./pages/Pages";
 
@@ -13,6 +15,7 @@ function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [waking, setWaking] = useState(false);
   const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || "/app";
 
   if (user) return <Navigate to="/app" replace />;
@@ -25,15 +28,23 @@ function Login() {
     }
     setBusy(true);
     setError("");
+    const slowTimer = window.setTimeout(() => setWaking(true), 800);
     try {
+      await wakeServer({ maxMs: 90_000, onSlow: () => setWaking(true) });
       await login(email.trim(), password);
       navigate(from.startsWith("/app") ? from : "/app");
     } catch (err) {
       setError((err as Error).message || "Sign in failed. Check your credentials or wait for the server to wake up.");
     } finally {
+      window.clearTimeout(slowTimer);
+      setWaking(false);
       setBusy(false);
     }
   };
+
+  if (waking) {
+    return <ServerWakeScreen detail="Waking up server — signing you in can take up to a minute on first load…" />;
+  }
 
   return (
     <div className="login">
@@ -77,7 +88,7 @@ function Login() {
 function Protected() {
   const { user, loading } = useAuth();
   const location = useLocation();
-  if (loading) return <div className="login"><div className="glass panel">Loading GDRPL Survey…</div></div>;
+  if (loading) return <ServerWakeScreen detail="Restoring your session…" />;
   if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   return (
     <AppFrame>
