@@ -19,6 +19,8 @@ import {
   UtilityBriefScreen,
   RootStack,
 } from "@/screens/Screens";
+import { ServerWakeScreen } from "@/components/ServerWakeScreen";
+import { wakeServer } from "@/lib/wakeServer";
 import { useTheme } from "@/context/ThemeContext";
 
 export type RootStackParams = RootStack;
@@ -39,10 +41,35 @@ function MainTabs() {
 export function RootNavigator() {
   const { theme } = useTheme();
   const [initial, setInitial] = useState<keyof RootStackParams | null>(null);
+  const [ready, setReady] = useState(false);
+  const [showWake, setShowWake] = useState(false);
+
   useEffect(() => {
-    SecureStore.getItemAsync("access_token").then((token) => setInitial(token ? "Main" : "Login"));
+    let cancelled = false;
+    (async () => {
+      const token = await SecureStore.getItemAsync("access_token");
+      if (!cancelled) setInitial(token ? "Main" : "Login");
+      await wakeServer({
+        onSlow: () => {
+          if (!cancelled) setShowWake(true);
+        },
+      });
+      if (!cancelled) {
+        setShowWake(false);
+        setReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  if (!initial) return null;
+
+  if (!ready) {
+    if (showWake) return <ServerWakeScreen />;
+    return null;
+  }
+  if (!initial) return <ServerWakeScreen detail="Starting GDRPL Survey…" />;
+
   return (
     <NavigationContainer
       theme={{

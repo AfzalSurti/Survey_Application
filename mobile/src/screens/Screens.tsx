@@ -7,6 +7,7 @@ import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { api, login, logout } from "@/api/client";
 import { addPhoto, cacheSchema, cachedSchema, dashboardCounts, getPreSurvey, records, savePreSurvey, saveRecord } from "@/db";
 import { Button, Field, GlassCard, Header, Label } from "@/components/UI";
+import { ServerWakeScreen } from "@/components/ServerWakeScreen";
 import { useTheme } from "@/context/ThemeContext";
 import {
   COMPANY_INTRO,
@@ -15,6 +16,7 @@ import {
   UTILITY_CATEGORIES,
   UTILITY_SURVEY_DESCRIPTION,
 } from "@/content/copy";
+import { wakeServer } from "@/lib/wakeServer";
 import { FormSchema, Question, QuestionType, SurveyRecord } from "@/types";
 import { syncPending } from "@/sync/engine";
 
@@ -97,23 +99,37 @@ export function LoginScreen({ navigation }: StackProps<"Login">) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [waking, setWaking] = useState(false);
+
   const signIn = async () => {
     if (!email.trim() || !password.trim()) {
       return reasonAlert("Sign in blocked", "Enter both email and password to continue.");
     }
     try {
       setLoading(true);
+      const slow = setTimeout(() => setWaking(true), 800);
+      await wakeServer({ onSlow: () => setWaking(true) });
+      clearTimeout(slow);
       await login(email.trim(), password);
+      setWaking(false);
       navigation.replace("CompanyIntro");
     } catch {
+      setWaking(false);
       reasonAlert(
         "Sign in failed",
-        "Email or password is incorrect, or the server is waking up. Wait a few seconds and try again.",
+        "Email or password is incorrect, or the server is still waking up. Wait about a minute and try again.",
       );
     } finally {
       setLoading(false);
     }
   };
+
+  if (waking) {
+    return (
+      <ServerWakeScreen detail="Waking up server — signing you in can take up to a minute on first load…" />
+    );
+  }
+
   return (
     <Screen subtitle="Geo Design and Research Pvt Ltd">
       <GlassCard>
