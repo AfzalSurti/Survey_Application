@@ -5,7 +5,7 @@
     "scheme": "gdrplsurvey",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/gdrpl-logo.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "plugins": [
       [
@@ -20,12 +20,15 @@
           "locationWhenInUsePermission": "Allow GDRPL Survey to capture survey coordinates."
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-asset",
+      "expo-sqlite",
+      "expo-font"
     ],
     "android": {
       "package": "com.gdrpl.survey",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/gdrpl-logo.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#DCEBFB"
       },
       "permissions": [
