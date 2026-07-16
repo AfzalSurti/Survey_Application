@@ -49,6 +49,9 @@ export function LandingPage() {
           <a className="button secondary" href="#about">
             About GDRPL
           </a>
+          <a className="button secondary" href="https://geogroup.in/" target="_blank" rel="noopener noreferrer">
+            Explore Company
+          </a>
         </div>
       </section>
 
@@ -57,11 +60,30 @@ export function LandingPage() {
         {COMPANY_INTRO.split("\n\n").map((para) => (
           <p key={para.slice(0, 40)}>{para}</p>
         ))}
+        <p>
+          Visit the official website:{" "}
+          <a href="https://geogroup.in/" target="_blank" rel="noopener noreferrer">
+            geogroup.in
+          </a>
+        </p>
       </section>
 
       <footer className="landing-footer">
-        <span>© {new Date().getFullYear()} Geo Designs & Research Pvt. Ltd.</span>
-        <Link to={user ? "/app" : "/login"}>{user ? "Dashboard" : "Sign in"}</Link>
+        <div className="landing-footer-left">
+          <span>© {new Date().getFullYear()} Geo Designs & Research Pvt. Ltd.</span>
+          <a href="https://geogroup.in/" target="_blank" rel="noopener noreferrer">
+            geogroup.in
+          </a>
+          <Link to={user ? "/app" : "/login"}>{user ? "Dashboard" : "Sign in"}</Link>
+        </div>
+        <a
+          className="made-with-love"
+          href="https://www.linkedin.com/in/afzal-surti-9904b2287/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Made with love by Afzal N. Surti
+        </a>
       </footer>
     </div>
   );

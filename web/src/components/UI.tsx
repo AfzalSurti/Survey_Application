@@ -115,7 +115,22 @@ export function AppFrame({ children }: { children: ReactNode }) {
       <Header />
       <div className="layout">
         <Sidebar />
-        <main className="content">{children}</main>
+        <main className="content">
+          {children}
+          <footer className="site-credit">
+            <a href="https://geogroup.in/" target="_blank" rel="noopener noreferrer">
+              Explore company — geogroup.in
+            </a>
+            <a
+              className="made-with-love"
+              href="https://www.linkedin.com/in/afzal-surti-9904b2287/"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Made with love by Afzal N. Surti
+            </a>
+          </footer>
+        </main>
       </div>
     </div>
   );

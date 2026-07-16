@@ -35,4 +35,10 @@ h1,h2,h3 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: 
 .landing-lead { max-width: 48ch; font-size: 1.05rem; margin: 0 0 22px; }
 .landing-about { padding: clamp(22px,4vw,36px); }
 .landing-about p { margin: 0 0 14px; line-height: 1.65; max-width: 72ch; }
-.landing-footer { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: .82rem; padding: 8px 4px 24px; }
+.landing-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; color: var(--muted); font-size: .82rem; padding: 8px 4px 24px; }
+.landing-footer-left { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; }
+.landing-footer a, .site-credit a { color: var(--accent-primary); font-weight: 600; }
+.landing-footer a:hover, .site-credit a:hover { text-decoration: underline; }
+.made-with-love { margin-left: auto; text-align: right; white-space: nowrap; }
+.site-credit { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 18px; padding: 10px 4px 0; color: var(--muted); font-size: .78rem; border-top: 1px solid rgba(91,132,166,.16); }
+.site-credit .made-with-love { font-size: .78rem; }
