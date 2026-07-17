@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Navigate } from "react-router-dom";
 import { Download, Plus, Search, X } from "lucide-react";
-import { client, fetchRecords, type Project, type RecordItem, type ReportTemplate, type User } from "../api/client";
+import { client, fetchDashboard, fetchRecords, type DashboardSummary, type Project, type RecordItem, type ReportTemplate, type User } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { ActionButton, GlassPanel, StatusBadge } from "../components/UI";
+import { PreviewModal } from "../components/PreviewModal";
+import { ActionButton, GlassPanel, StatusBadge, roleLabel } from "../components/UI";
 
 const Heading = ({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) => (
   <div className="page-heading">
@@ -16,64 +18,79 @@ const Heading = ({ eyebrow, title, action }: { eyebrow: string; title: string; a
 
 const fmt = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
 
-function RecordsTable({ records, select }: { records: RecordItem[]; select?: (r: RecordItem) => void }) {
+const SURVEY_COLUMNS_COMPLETE = [
+  "Project Name",
+  "Project No.",
+  "Survey Type",
+  "Key Person / Highway Engineer",
+  "Head Survey Person (Field Person)",
+  "Assign Date",
+  "Complete Date",
+] as const;
+
+function SurveyRowsTable({ records, showComplete }: { records: RecordItem[]; showComplete?: boolean }) {
+  const headers = showComplete === false ? SURVEY_COLUMNS_COMPLETE.slice(0, 6) : SURVEY_COLUMNS_COMPLETE;
   return (
     <div className="table-wrap">
       <table className="table">
         <thead>
           <tr>
-            <th>Chainage</th>
-            <th>Category</th>
-            <th>Status</th>
-            <th>Submitted</th>
+            {headers.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {records.map((r) => (
-            <tr key={r.id} onClick={() => select?.(r)}>
-              <td className="mono">{r.chainage}</td>
-              <td>{r.structure_category}</td>
-              <td>
-                <StatusBadge status={r.status} />
-              </td>
-              <td>{fmt(r.created_at)}</td>
+            <tr key={r.id} style={{ cursor: "default" }}>
+              <td>{r.project_name || "—"}</td>
+              <td className="mono">{r.project_number || "—"}</td>
+              <td>{r.survey_type || "—"}</td>
+              <td>{r.key_engineer_name || "—"}</td>
+              <td>{r.head_surveyor_name || "—"}</td>
+              <td>{fmt(r.assign_date)}</td>
+              {showComplete !== false ? <td>{fmt(r.complete_date)}</td> : null}
             </tr>
           ))}
         </tbody>
       </table>
-      {!records.length && <div className="empty">No survey records are available yet.</div>}
+      {!records.length && <div className="empty">No surveys in this list yet.</div>}
     </div>
   );
 }
 
 export function Dashboard() {
-  const [records, setRecords] = useState<RecordItem[]>([]);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
   useEffect(() => {
-    fetchRecords().then(setRecords).catch(() => setRecords([]));
+    fetchDashboard()
+      .then(setSummary)
+      .catch(() =>
+        setSummary({ total_projects: 0, complete_surveys: 0, ongoing_surveys: 0, complete_items: [], pending_items: [] }),
+      );
   }, []);
-  const statuses = ["approved", "submitted", "rejected", "draft"] as const;
   return (
     <>
       <Heading eyebrow="Operations overview" title="Survey intelligence, at a glance" />
-      <div className="grid stats">
-        {statuses.map((s) => (
-          <GlassPanel key={s}>
-            <div className="stat-label">{s} records</div>
-            <div className="stat-value">{records.filter((r) => r.status === s).length}</div>
-            <StatusBadge status={s} />
-          </GlassPanel>
-        ))}
+      <div className="grid stats stats-two">
+        <GlassPanel>
+          <div className="stat-label">Complete Survey</div>
+          <div className="stat-value">{summary?.complete_surveys ?? 0}</div>
+          <div className="stat-sub">Total project: {summary?.total_projects ?? 0}</div>
+        </GlassPanel>
+        <GlassPanel>
+          <div className="stat-label">On Going Survey</div>
+          <div className="stat-value">{summary?.ongoing_surveys ?? 0}</div>
+          <div className="stat-sub">Submitted or in-progress field work</div>
+        </GlassPanel>
       </div>
       <div className="split" style={{ marginTop: 16 }}>
         <GlassPanel>
-          <h2>Recent submissions</h2>
-          <RecordsTable records={records.slice(0, 6)} />
+          <h2>Recent Complete Survey List</h2>
+          <SurveyRowsTable records={summary?.complete_items ?? []} />
         </GlassPanel>
         <GlassPanel>
-          <h2>Review completion</h2>
-          <div className="stat-value">
-            {records.length ? Math.round((records.filter((r) => r.status === "approved").length / records.length) * 100) : 0}%
-          </div>
+          <h2>Currently Pending Survey List</h2>
+          <SurveyRowsTable records={summary?.pending_items ?? []} showComplete={false} />
         </GlassPanel>
       </div>
     </>
@@ -85,10 +102,21 @@ export function Records() {
   const canCorrect = user?.role === "admin" || user?.role === "super_admin";
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<RecordItem | null>(null);
   const [editJson, setEditJson] = useState("");
   const [editChainage, setEditChainage] = useState("");
+  const [preview, setPreview] = useState<"excel" | "word" | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [filters, setFilters] = useState({
+    project_name: "",
+    project_number: "",
+    survey_type: "",
+    key_engineer_name: "",
+    head_surveyor_name: "",
+    assign_date: "",
+    complete_date: "",
+  });
 
   useEffect(() => {
     fetchRecords().then(setRecords).catch(() => setRecords([]));
@@ -100,15 +128,26 @@ export function Records() {
     }
   }, [selected]);
 
-  const filtered = useMemo(
-    () =>
-      records.filter(
-        (r) =>
-          (status === "all" || r.status === status) &&
-          JSON.stringify(r).toLowerCase().includes(query.toLowerCase()),
-      ),
-    [records, query, status],
-  );
+  const filtered = useMemo(() => {
+    return records.filter((r) => {
+      const blob = JSON.stringify(r).toLowerCase();
+      if (query && !blob.includes(query.toLowerCase())) return false;
+      if (filters.project_name && !(r.project_name || "").toLowerCase().includes(filters.project_name.toLowerCase())) return false;
+      if (filters.project_number && !(r.project_number || "").toLowerCase().includes(filters.project_number.toLowerCase())) return false;
+      if (filters.survey_type && !(r.survey_type || "").toLowerCase().includes(filters.survey_type.toLowerCase())) return false;
+      if (filters.key_engineer_name && !(r.key_engineer_name || "").toLowerCase().includes(filters.key_engineer_name.toLowerCase())) return false;
+      if (filters.head_surveyor_name && !(r.head_surveyor_name || "").toLowerCase().includes(filters.head_surveyor_name.toLowerCase())) return false;
+      if (filters.assign_date && fmt(r.assign_date) !== filters.assign_date && !(r.assign_date || "").includes(filters.assign_date)) return false;
+      if (filters.complete_date && fmt(r.complete_date) !== filters.complete_date && !(r.complete_date || "").includes(filters.complete_date)) return false;
+      return true;
+    });
+  }, [records, query, filters]);
+
+  const selectedRecords = filtered.filter((r) => selectedIds.includes(r.id));
+  const toggleRow = (r: RecordItem) => {
+    setSelected(r);
+    setSelectedIds((ids) => (ids.includes(r.id) ? ids.filter((id) => id !== r.id) : [...ids, r.id]));
+  };
 
   const setStatusAction = async (next: "approved" | "rejected") => {
     if (!selected) return;
@@ -122,99 +161,116 @@ export function Records() {
   };
 
   const saveCorrections = async () => {
-    if (!selected) {
-      alert("Select a survey record first before saving corrections.");
-      return;
-    }
-    if (!canCorrect) {
-      alert("Only admin or super admin can correct survey answers. Your role cannot edit record data.");
-      return;
-    }
-    if (!editChainage.trim()) {
-      alert("Chainage cannot be empty.");
-      return;
-    }
+    if (!selected || !canCorrect) return;
     try {
       const responses_json = JSON.parse(editJson);
-      const updated = await client.patch<RecordItem>(`/records/${selected.id}`, {
-        chainage: editChainage,
-        responses_json,
-      });
+      const updated = await client.patch<RecordItem>(`/records/${selected.id}`, { chainage: editChainage, responses_json });
       setRecords((x) => x.map((r) => (r.id === updated.id ? updated : r)));
       setSelected(updated);
       alert("Record data corrected.");
     } catch (e) {
-      alert((e as Error).message || "Could not save corrections. Check that Responses JSON is valid.");
+      alert((e as Error).message || "Could not save corrections.");
     }
   };
 
+  const downloadWord = async () => {
+    const ids = selectedRecords.map((r) => r.id);
+    if (!ids.length) return alert("Select at least one record.");
+    setBusy(true);
+    try { await client.download("/reports/generate", { record_ids: ids }, "POST"); }
+    catch (e) { alert((e as Error).message); }
+    finally { setBusy(false); }
+  };
+  const downloadExcel = async () => {
+    setBusy(true);
+    try { await client.download("/exports/excel"); }
+    catch (e) { alert((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const filterFields: { key: keyof typeof filters; label: string }[] = [
+    { key: "project_name", label: "Project Name" },
+    { key: "project_number", label: "Project No." },
+    { key: "survey_type", label: "Survey Type" },
+    { key: "key_engineer_name", label: "Key Person / Highway Engineer" },
+    { key: "head_surveyor_name", label: "Head Survey Person" },
+    { key: "assign_date", label: "Assign Date" },
+    { key: "complete_date", label: "Complete Date" },
+  ];
+
   return (
     <>
-      <Heading eyebrow="Review workspace" title="Survey records" action={<span className="muted">{filtered.length} visible</span>} />
-      <GlassPanel>
-        <div className="toolbar">
-          <div style={{ position: "relative" }}>
-            <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "#627b95" }} />
-            <input className="field" style={{ paddingLeft: 32 }} placeholder="Search records" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <Heading eyebrow="Review workspace" title="Survey records" action={<span className="muted">{selectedIds.length} selected · {filtered.length} visible</span>} />
+      <div className="records-layout">
+        <GlassPanel>
+          <div className="toolbar">
+            <div style={{ position: "relative", flex: 1 }}>
+              <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "#627b95" }} />
+              <input className="field" style={{ paddingLeft: 32, width: "100%" }} placeholder="Search records" value={query} onChange={(e) => setQuery(e.target.value)} />
+            </div>
           </div>
-          <select className="field" value={status} onChange={(e) => setStatus(e.target.value)}>
-            <option value="all">All statuses</option>
-            <option value="submitted">Submitted</option>
-            <option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-            <option value="draft">Draft</option>
-          </select>
+          <div className="filter-row">
+            {filterFields.map((f) => (
+              <input key={f.key} className="field" placeholder={f.label} value={filters[f.key]} onChange={(e) => setFilters((s) => ({ ...s, [f.key]: e.target.value }))} />
+            ))}
+          </div>
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th></th>
+                  {SURVEY_COLUMNS_COMPLETE.map((h) => (<th key={h}>{h}</th>))}
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.id} onClick={() => toggleRow(r)}>
+                    <td><input type="checkbox" checked={selectedIds.includes(r.id)} readOnly /></td>
+                    <td>{r.project_name || "—"}</td>
+                    <td className="mono">{r.project_number || "—"}</td>
+                    <td>{r.survey_type || "—"}</td>
+                    <td>{r.key_engineer_name || "—"}</td>
+                    <td>{r.head_surveyor_name || "—"}</td>
+                    <td>{fmt(r.assign_date)}</td>
+                    <td>{fmt(r.complete_date)}</td>
+                    <td><StatusBadge status={r.status} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!filtered.length && <div className="empty">No survey records match these filters.</div>}
+          </div>
+        </GlassPanel>
+        <div className="records-actions">
+          <ActionButton className="button" disabled={!selectedIds.length} disabledReason="Select one or more rows first." onClick={() => setPreview("excel")}>CSV/Excel Generation</ActionButton>
+          <ActionButton className="button secondary" disabled={!selectedIds.length} disabledReason="Select rows, then preview Excel." onClick={() => setPreview("excel")}>Preview Excel</ActionButton>
+          <ActionButton className="button" disabled={!selectedIds.length} disabledReason="Select one or more rows first." onClick={() => setPreview("word")}>Report Generation</ActionButton>
+          <ActionButton className="button secondary" disabled={!selectedIds.length} disabledReason="Select rows, then preview the Word report." onClick={() => setPreview("word")}>Preview Word Report</ActionButton>
         </div>
-        <RecordsTable records={filtered} select={setSelected} />
-      </GlassPanel>
+      </div>
+      <PreviewModal open={preview !== null} title={preview === "excel" ? "Excel preview" : "Word report preview"} records={selectedRecords} busy={busy} onClose={() => setPreview(null)} onDownloadWord={downloadWord} onDownloadExcel={downloadExcel} />
       {selected && (
         <aside className="glass drawer">
-          <button className="drawer-close" onClick={() => setSelected(null)}>
-            <X />
-          </button>
+          <button className="drawer-close" onClick={() => setSelected(null)}><X /></button>
           <p className="eyebrow">Record details</p>
           <h2>{selected.chainage}</h2>
-          <div style={{ margin: "12px 0" }}>
-            <StatusBadge status={selected.status} />
-          </div>
-          <div className="kv">
-            <span>Category</span>
-            <strong>{selected.structure_category}</strong>
-          </div>
-          <div className="kv">
-            <span>Schema version</span>
-            <strong>v{selected.schema_version}</strong>
-          </div>
+          <div style={{ margin: "12px 0" }}><StatusBadge status={selected.status} /></div>
+          <div className="kv"><span>Project</span><strong>{selected.project_name || "—"}</strong></div>
+          <div className="kv"><span>Survey type</span><strong>{selected.survey_type || "—"}</strong></div>
           {canCorrect ? (
             <>
               <h3 style={{ marginTop: 20 }}>Correct data</h3>
-              <p className="muted">Admins can fix answers. Form fields/architecture are super-admin only.</p>
-              <div className="form-row">
-                <label>Chainage</label>
-                <input className="field mono" value={editChainage} onChange={(e) => setEditChainage(e.target.value)} />
+              <div className="form-row"><label>Chainage</label><input className="field mono" value={editChainage} onChange={(e) => setEditChainage(e.target.value)} /></div>
+              <div className="form-row"><label>Responses JSON</label><textarea className="field code" value={editJson} onChange={(e) => setEditJson(e.target.value)} spellCheck={false} /></div>
+              <button className="button" onClick={saveCorrections}>Save corrections</button>
+              <div className="toolbar" style={{ marginTop: 12 }}>
+                <button className="button" onClick={() => setStatusAction("approved")}>Approve</button>
+                <button className="button danger" onClick={() => setStatusAction("rejected")}>Reject</button>
               </div>
-              <div className="form-row">
-                <label>Responses JSON</label>
-                <textarea className="field code" value={editJson} onChange={(e) => setEditJson(e.target.value)} spellCheck={false} />
-              </div>
-              <button className="button" onClick={saveCorrections}>
-                Save corrections
-              </button>
             </>
           ) : (
-            <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>
-              {JSON.stringify(selected.responses_json || {}, null, 2)}
-            </pre>
-          )}
-          {canCorrect && (
-            <div className="toolbar" style={{ marginTop: 12 }}>
-              <button className="button" onClick={() => setStatusAction("approved")}>
-                Approve
-              </button>
-              <button className="button danger" onClick={() => setStatusAction("rejected")}>
-                Reject
-              </button>
-            </div>
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>{JSON.stringify(selected.responses_json || {}, null, 2)}</pre>
           )}
         </aside>
       )}
@@ -222,78 +278,12 @@ export function Records() {
   );
 }
 
+/** Old sidebar pages removed — redirect into Records. */
 export function Reports() {
-  const [records, setRecords] = useState<RecordItem[]>([]);
-  const [ids, setIds] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    fetchRecords()
-      .then((r) => setRecords(r.filter((x) => x.status === "approved")))
-      .catch(() => setRecords([]));
-  }, []);
-  const generate = async () => {
-    setBusy(true);
-    try {
-      await client.download("/reports/generate", { record_ids: ids }, "POST");
-    } catch (e) {
-      alert((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <>
-      <Heading
-        eyebrow="Documentation"
-        title="Generate a field report"
-        action={
-          <ActionButton
-            disabled={!ids.length || busy}
-            disabledReason={
-              busy
-                ? "Report generation is already running. Please wait."
-                : "Select at least one approved survey record in the table before downloading a DOCX report."
-            }
-            onClick={generate}
-          >
-            <Download size={15} /> {busy ? "Generating…" : "Download DOCX"}
-          </ActionButton>
-        }
-      />
-      <GlassPanel>
-        <p>Select approved survey records.</p>
-        <RecordsTable records={records} select={(r) => setIds((v) => (v.includes(r.id) ? v.filter((id) => id !== r.id) : [...v, r.id]))} />
-        <p className="muted">{ids.length} selected</p>
-      </GlassPanel>
-    </>
-  );
+  return <Navigate to="/app/records" replace />;
 }
-
 export function ExcelExport() {
-  const [busy, setBusy] = useState(false);
-  return (
-    <>
-      <Heading eyebrow="Data portability" title="Excel export" />
-      <GlassPanel>
-        <ActionButton
-          disabled={busy}
-          disabledReason="Excel export is already preparing. Please wait."
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await client.download("/exports/excel");
-            } catch (e) {
-              alert((e as Error).message || "Excel export failed. Check your connection and try again.");
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <Download size={15} /> {busy ? "Preparing…" : "Download .xlsx"}
-        </ActionButton>
-      </GlassPanel>
-    </>
-  );
+  return <Navigate to="/app/records" replace />;
 }
 
 export function SchemaEditor() {
@@ -357,24 +347,18 @@ export function UsersPage() {
       alert("Name, email, and password are required to create a user.");
       return;
     }
-    if (form.role === "surveyor" && !form.project_ids.length) {
-      const ok = window.confirm(
-        "This surveyor has no assigned projects. They will not see any project on mobile until you assign one. Create anyway?",
-      );
-      if (!ok) return;
-    }
     try {
       const u = await client.post<User>("/users", {
         name: form.name,
         email: form.email,
         password: form.password,
         role: form.role,
-        project_ids: form.role === "surveyor" ? form.project_ids : [],
+        project_ids: form.project_ids,
       });
       setUsers([u, ...users]);
       setForm({ name: "", email: "", password: "", role: "surveyor", project_ids: [] });
     } catch (e) {
-      alert((e as Error).message || "Could not create user. The email may already exist.");
+      alert((e as Error).message || "Could not create user.");
     }
   };
   return (
@@ -386,59 +370,44 @@ export function UsersPage() {
           {(["name", "email", "password"] as const).map((k) => (
             <div className="form-row" key={k}>
               <label>{k[0].toUpperCase() + k.slice(1)}</label>
-              <input
-                className="field"
-                type={k === "password" ? "password" : k === "email" ? "email" : "text"}
-                value={form[k]}
-                onChange={(e) => setForm({ ...form, [k]: e.target.value })}
-              />
+              <input className="field" type={k === "password" ? "password" : k === "email" ? "email" : "text"} value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
             </div>
           ))}
           <div className="form-row">
             <label>Role</label>
             <select className="field" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-              <option value="surveyor">surveyor</option>
-              <option value="admin">admin</option>
-              <option value="super_admin">super_admin</option>
+              <option value="super_admin">Super Admin</option>
+              <option value="admin">Admin</option>
+              <option value="surveyor">Field</option>
             </select>
           </div>
-          {form.role === "surveyor" && (
-            <div className="form-row">
-              <label>Assign projects (optional)</label>
-              <div style={{ display: "grid", gap: 6 }}>
-                {projects.map((p) => (
-                  <label key={p.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input type="checkbox" checked={form.project_ids.includes(p.id)} onChange={() => toggleProject(p.id)} />
-                    <span>
-                      {p.name} <span className="mono muted">({p.project_number})</span>
-                    </span>
-                  </label>
-                ))}
-                {!projects.length && <span className="muted">Create a project first, or assign later in Projects.</span>}
-              </div>
+          <div className="form-row">
+            <label>Assign projects (optional — Field, Admin, Super Admin can survey)</label>
+            <div style={{ display: "grid", gap: 6 }}>
+              {projects.map((p) => (
+                <label key={p.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input type="checkbox" checked={form.project_ids.includes(p.id)} onChange={() => toggleProject(p.id)} />
+                  <span>{p.name} <span className="mono muted">({p.project_number})</span></span>
+                </label>
+              ))}
+              {!projects.length && <span className="muted">Create a project first.</span>}
             </div>
-          )}
-          <button className="button" onClick={add}>
-            <Plus size={15} /> Create user
-          </button>
+          </div>
+          <button className="button" onClick={add}><Plus size={15} /> Create user</button>
         </GlassPanel>
         <GlassPanel>
-          <h2>Directory</h2>
+          <h2>List of Added Employee</h2>
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                </tr>
+                <tr><th>Employee Name</th><th>Email Ids</th><th>Role</th></tr>
               </thead>
               <tbody>
                 {users.map((u) => (
                   <tr key={u.id}>
                     <td>{u.name}</td>
                     <td className="mono">{u.email}</td>
-                    <td>{u.role}</td>
+                    <td>{roleLabel(u.role)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -451,29 +420,40 @@ export function UsersPage() {
 }
 
 export function ProjectsPage() {
+  const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [surveyors, setSurveyors] = useState<User[]>([]);
-  const [form, setForm] = useState({ name: "", project_number: "", highway_number: "", surveyor_ids: [] as string[] });
+  const [fieldUsers, setFieldUsers] = useState<User[]>([]);
+  const [form, setForm] = useState({
+    name: "",
+    project_number: "",
+    highway_number: "",
+    key_engineer_id: "",
+    surveyor_id: "",
+  });
   const [selected, setSelected] = useState<Project | null>(null);
   const [assignIds, setAssignIds] = useState<string[]>([]);
 
   const reload = () => {
     client.get<Project[]>("/projects").then(setProjects).catch(() => setProjects([]));
-    client.get<User[]>("/users?role=surveyor").then(setSurveyors).catch(() => setSurveyors([]));
+    client.get<User[]>("/users").then((all) => setFieldUsers(all.filter((u) => u.is_active))).catch(() => setFieldUsers([]));
   };
   useEffect(reload, []);
-
-  const toggle = (ids: string[], id: string, set: (v: string[]) => void) =>
-    set(ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]);
 
   const create = async () => {
     if (!form.name.trim() || !form.project_number.trim() || !form.highway_number.trim()) {
       alert("Project name, project number, and highway number are all required.");
       return;
     }
+    const surveyor_ids = form.surveyor_id ? [form.surveyor_id] : user?.id ? [user.id] : [];
     try {
-      await client.post("/projects", form);
-      setForm({ name: "", project_number: "", highway_number: "", surveyor_ids: [] });
+      await client.post("/projects", {
+        name: form.name,
+        project_number: form.project_number,
+        highway_number: form.highway_number,
+        key_engineer_id: form.key_engineer_id || null,
+        surveyor_ids,
+      });
+      setForm({ name: "", project_number: "", highway_number: "", key_engineer_id: "", surveyor_id: "" });
       reload();
     } catch (e) {
       alert((e as Error).message || "Could not create project.");
@@ -497,49 +477,54 @@ export function ProjectsPage() {
     }
   };
 
+  const selectedSurveyor = fieldUsers.find((u) => u.id === form.surveyor_id);
+
   return (
     <>
-      <Heading eyebrow="Super admin" title="Projects & surveyor assignment" />
+      <Heading eyebrow="Super admin" title="Project Key Engineer and Surveyor Assign" />
       <div className="split">
         <GlassPanel>
           <h2>Create project</h2>
-          {(["name", "project_number", "highway_number"] as const).map((k) => (
-            <div className="form-row" key={k}>
-              <label>{k.replace("_", " ")}</label>
-              <input className="field" value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} />
-            </div>
-          ))}
+          <div className="form-row"><label>Project name</label><input className="field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+          <div className="form-row"><label>Project number</label><input className="field" value={form.project_number} onChange={(e) => setForm({ ...form, project_number: e.target.value })} /></div>
+          <div className="form-row"><label>Highway number</label><input className="field" value={form.highway_number} onChange={(e) => setForm({ ...form, highway_number: e.target.value })} /></div>
           <div className="form-row">
-            <label>Assign surveyors now (optional)</label>
-            {surveyors.map((s) => (
-              <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input type="checkbox" checked={form.surveyor_ids.includes(s.id)} onChange={() => toggle(form.surveyor_ids, s.id, (v) => setForm({ ...form, surveyor_ids: v }))} />
-                {s.name} <span className="muted mono">({s.email})</span>
-              </label>
-            ))}
+            <label>Name of Key Engineer / Highway Engineer</label>
+            <select className="field" value={form.key_engineer_id} onChange={(e) => setForm({ ...form, key_engineer_id: e.target.value })}>
+              <option value="">Select key engineer</option>
+              {fieldUsers.map((u) => (
+                <option key={u.id} value={u.id}>{u.name} ({u.email}) — {roleLabel(u.role)}</option>
+              ))}
+            </select>
           </div>
-          <button className="button" onClick={create}>
-            <Plus size={15} /> Create project
-          </button>
+          <div className="form-row">
+            <label>Name of Surveyor (Field person)</label>
+            <select className="field" value={form.surveyor_id} onChange={(e) => setForm({ ...form, surveyor_id: e.target.value })}>
+              <option value="">Use logged-in user ({user?.email})</option>
+              {fieldUsers.map((u) => (
+                <option key={u.id} value={u.id}>{u.name} ({u.email}) — {roleLabel(u.role)}</option>
+              ))}
+            </select>
+          </div>
+          <p className="muted">
+            Email for field assignment: <strong className="mono">{selectedSurveyor?.email || user?.email || "—"}</strong>
+            {" "}(auto-assigned to this project so they can continue survey work).
+          </p>
+          <button className="button" onClick={create}><Plus size={15} /> Create project</button>
         </GlassPanel>
         <GlassPanel>
           <h2>All projects</h2>
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Number</th>
-                  <th>Highway</th>
-                  <th>Surveyors</th>
-                </tr>
+                <tr><th>Name</th><th>Number</th><th>Key Engineer</th><th>Field users</th></tr>
               </thead>
               <tbody>
                 {projects.map((p) => (
                   <tr key={p.id} onClick={() => openAssign(p)}>
                     <td>{p.name}</td>
                     <td className="mono">{p.project_number}</td>
-                    <td>{p.highway_number}</td>
+                    <td>{p.key_engineer_name || "—"}</td>
                     <td>{p.surveyor_ids?.length || 0}</td>
                   </tr>
                 ))}
@@ -548,16 +533,14 @@ export function ProjectsPage() {
           </div>
           {selected && (
             <div style={{ marginTop: 16 }}>
-              <h3>Assign surveyors — {selected.name}</h3>
-              {surveyors.map((s) => (
+              <h3>Assign field users — {selected.name}</h3>
+              {fieldUsers.map((s) => (
                 <label key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                  <input type="checkbox" checked={assignIds.includes(s.id)} onChange={() => toggle(assignIds, s.id, setAssignIds)} />
-                  {s.name} ({s.email})
+                  <input type="checkbox" checked={assignIds.includes(s.id)} onChange={() => setAssignIds((ids) => ids.includes(s.id) ? ids.filter((x) => x !== s.id) : [...ids, s.id])} />
+                  {s.name} ({s.email}) — {roleLabel(s.role)}
                 </label>
               ))}
-              <button className="button" onClick={saveAssign}>
-                Save assignments
-              </button>
+              <button className="button" onClick={saveAssign}>Save assignments</button>
             </div>
           )}
         </GlassPanel>

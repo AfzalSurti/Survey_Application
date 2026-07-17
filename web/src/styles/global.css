@@ -138,3 +138,14 @@ h1,h2,h3 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: 
   0%, 80%, 100% { opacity: .25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-3px); }
 }
+
+.stats-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.filter-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
+.filter-row .field { width: 100%; font-size: .8rem; padding: 8px; }
+.records-actions { display: flex; flex-direction: column; gap: 8px; min-width: 160px; }
+.records-layout { display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .records-layout { grid-template-columns: 1fr; } .stats-two { grid-template-columns: 1fr; } }
+.preview-backdrop { position: fixed; inset: 0; z-index: 20; background: rgba(15, 36, 56, .45); display: grid; place-items: center; padding: 20px; }
+.preview-panel { width: min(1100px, 100%); max-height: calc(100vh - 40px); overflow: auto; padding: 20px; }
+.preview-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.stat-sub { font-size: .85rem; color: var(--muted); margin-top: 6px; }
