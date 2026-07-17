@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
-import { Download, Plus, Search, X } from "lucide-react";
+import { Plus, Search, X } from "lucide-react";
 import { client, fetchDashboard, fetchRecords, type DashboardSummary, type Project, type RecordItem, type ReportTemplate, type User } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { PreviewModal } from "../components/PreviewModal";
