@@ -82,7 +82,8 @@ async def create_user(
     )
     db.add(user)
     await db.flush()
-    if body.role == UserRole.surveyor and body.project_ids:
+    # Field (surveyor), Admin, and Super Admin may be assigned to projects for field work.
+    if body.project_ids and body.role in {UserRole.surveyor, UserRole.admin, UserRole.super_admin}:
         await _assign_projects(db, user.id, body.project_ids, actor.id)
     await db.refresh(user)
     return user

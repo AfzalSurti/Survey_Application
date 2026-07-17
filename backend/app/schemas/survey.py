@@ -12,6 +12,8 @@ class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     project_number: str = Field(min_length=1, max_length=100)
     highway_number: str = Field(min_length=1, max_length=100)
+    key_engineer_id: UUID | None = None
+    key_engineer_name: str | None = Field(default=None, max_length=255)
     surveyor_ids: list[UUID] = Field(default_factory=list)
 
 
@@ -22,9 +24,12 @@ class ProjectOut(BaseModel):
     name: str
     project_number: str
     highway_number: str
+    key_engineer_id: UUID | None = None
+    key_engineer_name: str | None = None
     created_by: UUID
     created_at: datetime
     surveyor_ids: list[UUID] = Field(default_factory=list)
+    assign_date: datetime | None = None
 
 
 class ProjectAssignRequest(BaseModel):
@@ -63,6 +68,14 @@ class SurveyRecordOut(BaseModel):
     sheets_row_id: str | None
     created_at: datetime
     updated_at: datetime
+    # Enriched display fields for admin dashboard / records
+    project_name: str | None = None
+    project_number: str | None = None
+    survey_type: str | None = None
+    key_engineer_name: str | None = None
+    head_surveyor_name: str | None = None
+    assign_date: datetime | None = None
+    complete_date: datetime | None = None
 
 
 class SurveyRecordPage(BaseModel):
@@ -70,6 +83,14 @@ class SurveyRecordPage(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class DashboardSummary(BaseModel):
+    total_projects: int
+    complete_surveys: int
+    ongoing_surveys: int
+    complete_items: list[SurveyRecordOut]
+    pending_items: list[SurveyRecordOut]
 
 
 class SurveyRecordStatusUpdate(BaseModel):

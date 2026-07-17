@@ -7,13 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models import SurveyRecord, SurveyStatus, User, UserRole
+from app.models import Project, SurveyRecord, SurveyStatus, User, UserRole
 from app.schemas.survey import (
+    DashboardSummary,
     SurveyRecordDataUpdate,
     SurveyRecordOut,
     SurveyRecordPage,
     SurveyRecordStatusUpdate,
 )
+from app.services.record_enrichment import enrich_records
 
 
 router = APIRouter(prefix="/api/records", tags=["records"])
@@ -49,6 +51,29 @@ def _record_filters(
     return filters
 
 
+@router.get("/dashboard", response_model=DashboardSummary)
+async def dashboard_summary(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DashboardSummary:
+    filters = _record_filters(None, None, None, None, None, None, None, user)
+    result = await db.execute(
+        select(SurveyRecord).where(*filters).order_by(SurveyRecord.updated_at.desc())
+    )
+    records = list(result.scalars().all())
+    enriched = await enrich_records(db, records)
+    complete = [r for r in enriched if r.status == SurveyStatus.approved]
+    ongoing = [r for r in enriched if r.status in {SurveyStatus.submitted, SurveyStatus.draft}]
+    total_projects = await db.scalar(select(func.count()).select_from(Project)) or 0
+    return DashboardSummary(
+        total_projects=total_projects,
+        complete_surveys=len(complete),
+        ongoing_surveys=len(ongoing),
+        complete_items=complete[:25],
+        pending_items=ongoing[:25],
+    )
+
+
 @router.get("", response_model=SurveyRecordPage)
 async def list_records(
     project_id: UUID | None = None,
@@ -74,8 +99,9 @@ async def list_records(
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
+    items = await enrich_records(db, list(result.scalars().all()))
     return SurveyRecordPage(
-        items=list(result.scalars().all()),
+        items=items,
         total=total or 0,
         page=page,
         page_size=page_size,
@@ -87,14 +113,15 @@ async def get_record(
     record_id: UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> SurveyRecord:
+) -> SurveyRecordOut:
     result = await db.execute(select(SurveyRecord).where(SurveyRecord.id == record_id))
     record = result.scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Survey record not found")
     if user.role == UserRole.surveyor and record.surveyor_id != user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Record belongs to another surveyor")
-    return record
+    enriched = await enrich_records(db, [record])
+    return enriched[0]
 
 
 @router.patch("/{record_id}/status", response_model=SurveyRecordOut)
@@ -103,7 +130,7 @@ async def update_record_status(
     body: SurveyRecordStatusUpdate,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(UserRole.admin, UserRole.super_admin)),
-) -> SurveyRecord:
+) -> SurveyRecordOut:
     if body.status not in {SurveyStatus.approved, SurveyStatus.rejected}:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -116,7 +143,7 @@ async def update_record_status(
     record.status = body.status
     await db.flush()
     await db.refresh(record)
-    return record
+    return (await enrich_records(db, [record]))[0]
 
 
 @router.patch("/{record_id}", response_model=SurveyRecordOut)
@@ -125,7 +152,7 @@ async def correct_record_data(
     body: SurveyRecordDataUpdate,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(UserRole.admin, UserRole.super_admin)),
-) -> SurveyRecord:
+) -> SurveyRecordOut:
     """Correct survey answer data. Does not change questionnaire schema/architecture."""
     result = await db.execute(select(SurveyRecord).where(SurveyRecord.id == record_id))
     record = result.scalar_one_or_none()
@@ -149,4 +176,4 @@ async def correct_record_data(
 
     await db.flush()
     await db.refresh(record)
-    return record
+    return (await enrich_records(db, [record]))[0]
