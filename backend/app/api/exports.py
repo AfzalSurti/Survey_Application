@@ -12,6 +12,7 @@ from app.api.records import _record_filters
 from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import SurveyRecord, SurveyStatus, User
+from app.services.record_enrichment import enrich_records
 
 
 router = APIRouter(prefix="/api/exports", tags=["exports"])
@@ -35,42 +36,39 @@ async def export_excel(
     result = await db.execute(
         select(SurveyRecord).where(*filters).order_by(SurveyRecord.captured_at.desc())
     )
+    enriched = await enrich_records(db, list(result.scalars().all()))
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Survey Records"
     sheet.append(
         [
-            "Record ID",
-            "Project ID",
-            "Surveyor ID",
+            "Project Name",
+            "Project No.",
+            "Survey Type",
+            "Key Person / Highway Engineer",
+            "Head Survey Person",
+            "Assign Date",
+            "Complete Date",
             "Chainage",
-            "Structure Category",
-            "Schema Version",
-            "Latitude",
-            "Longitude",
-            "Captured At",
+            "Category",
             "Status",
-            "Sync Status",
-            "Sheets Row ID",
-            "Responses",
+            "Captured At",
         ]
     )
-    for record in result.scalars():
+    for record in enriched:
         sheet.append(
             [
-                str(record.id),
-                str(record.project_id),
-                str(record.surveyor_id),
+                record.project_name,
+                record.project_number,
+                record.survey_type,
+                record.key_engineer_name,
+                record.head_surveyor_name,
+                record.assign_date.isoformat() if record.assign_date else None,
+                record.complete_date.isoformat() if record.complete_date else None,
                 record.chainage,
                 record.structure_category,
-                record.schema_version,
-                float(record.latitude) if record.latitude is not None else None,
-                float(record.longitude) if record.longitude is not None else None,
-                record.captured_at.isoformat() if record.captured_at else None,
                 record.status.value,
-                record.sync_status.value,
-                record.sheets_row_id,
-                str(record.responses_json),
+                record.captured_at.isoformat() if record.captured_at else None,
             ]
         )
     stream = BytesIO()
