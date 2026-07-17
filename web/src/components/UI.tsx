@@ -1,4 +1,4 @@
-import { LayoutDashboard, ClipboardList, Braces, Users, Settings, Layers, LogOut, FolderKanban } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Braces, Users, Settings, Layers, LogOut, FolderKanban, MessageSquarePlus } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import type { ReactNode } from "react";
@@ -18,18 +18,31 @@ export function roleLabel(role?: string) {
   return role?.replace(/_/g, " ") || "—";
 }
 
-/** Super-admin nav order: 1 Dashboard, 2 Records, 3 Projects, 4 Users, 5 Schema, 6 Settings (+ Templates). */
-const commonEntries = [
+/** Admin nav: 1 Dashboard, 2 Records, Templates, Request — no Report/Excel. */
+const adminEntries = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/records", label: "Records", icon: ClipboardList },
+  { to: "/app/templates", label: "Templates", icon: Layers },
+  { to: "/app/requests", label: "Request", icon: MessageSquarePlus },
 ];
+
+/** Super-admin: Dashboard, Records, Projects, Users, Schema, Settings, Templates, Requests inbox. */
 const superAdminEntries = [
+  { to: "/app", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/app/records", label: "Records", icon: ClipboardList },
   { to: "/app/projects", label: "Projects", icon: FolderKanban },
   { to: "/app/users", label: "Users", icon: Users },
   { to: "/app/schema", label: "Schema editor", icon: Braces },
   { to: "/app/settings", label: "Settings", icon: Settings },
   { to: "/app/templates", label: "Templates", icon: Layers },
+  { to: "/app/requests", label: "Requests", icon: MessageSquarePlus },
 ];
+
+const fieldEntries = [
+  { to: "/app", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/app/records", label: "Records", icon: ClipboardList },
+];
+
 /** Buttons stay clickable when "disabled" so users get a clear reason. */
 export function ActionButton({
   children,
@@ -101,9 +114,9 @@ export function Header() {
 
 function Sidebar() {
   const { user } = useAuth();
-  let nav = commonEntries;
-  if (user?.role === "super_admin") nav = [...commonEntries, ...superAdminEntries];
-  else if (user?.role === "admin" || user?.role === "surveyor") nav = commonEntries;
+  let nav = fieldEntries;
+  if (user?.role === "super_admin") nav = superAdminEntries;
+  else if (user?.role === "admin") nav = adminEntries;
   return (
     <aside className="glass sidebar">
       {nav.map(({ to, label, icon: Icon }) => (
