@@ -29,7 +29,7 @@ export function PreviewModal({ open, title, records, onClose, onDownloadWord, on
               disabledReason={!records.length ? "Select at least one record to download." : "Download already in progress."}
               onClick={onDownloadWord}
             >
-              Download Word Report
+              Download PDF / Word
             </ActionButton>
             <ActionButton
               className="button"
@@ -44,7 +44,7 @@ export function PreviewModal({ open, title, records, onClose, onDownloadWord, on
             </button>
           </div>
         </div>
-        <p className="muted">Preview of {records.length} selected survey row(s). Download Word or Excel from this panel.</p>
+        <p className="muted">Preview of {records.length} selected survey row(s). Use the buttons above to download PDF/Word or Excel.</p>
         <div className="table-wrap">
           <table className="table">
             <thead>
