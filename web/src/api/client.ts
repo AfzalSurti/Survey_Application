@@ -5,9 +5,12 @@ export type Project = {
   name: string;
   project_number: string;
   highway_number: string;
+  key_engineer_id?: string | null;
+  key_engineer_name?: string | null;
   created_by: string;
   created_at: string;
   surveyor_ids: string[];
+  assign_date?: string | null;
 };
 export type RecordItem = {
   id: string;
@@ -24,6 +27,20 @@ export type RecordItem = {
   sync_status: string;
   created_at?: string;
   updated_at?: string;
+  project_name?: string | null;
+  project_number?: string | null;
+  survey_type?: string | null;
+  key_engineer_name?: string | null;
+  head_surveyor_name?: string | null;
+  assign_date?: string | null;
+  complete_date?: string | null;
+};
+export type DashboardSummary = {
+  total_projects: number;
+  complete_surveys: number;
+  ongoing_surveys: number;
+  complete_items: RecordItem[];
+  pending_items: RecordItem[];
 };
 
 /** Production API base (Render). Local/dev uses Vite proxy `/api`. */
@@ -108,4 +125,8 @@ export const client = {
 export async function fetchRecords(): Promise<RecordItem[]> {
   const page = await client.get<{ items: RecordItem[] }>("/records?page_size=200");
   return page.items ?? [];
+}
+
+export async function fetchDashboard(): Promise<DashboardSummary> {
+  return client.get<DashboardSummary>("/records/dashboard");
 }
