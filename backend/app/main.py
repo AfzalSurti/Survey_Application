@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    admin_requests,
     auth,
     exports,
     projects,
@@ -47,6 +48,7 @@ def create_app() -> FastAPI:
     app.include_router(templates.router)
     app.include_router(exports.router)
     app.include_router(settings_api.router)
+    app.include_router(admin_requests.router)
 
     @app.get("/api/health")
     async def health():
