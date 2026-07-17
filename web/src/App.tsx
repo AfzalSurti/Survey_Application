@@ -5,6 +5,7 @@ import { AppFrame } from "./components/UI";
 import { ServerWakeScreen } from "./components/ServerWakeScreen";
 import { wakeServer } from "./lib/wakeServer";
 import { LandingPage } from "./pages/Landing";
+import { RequestsPage } from "./pages/Requests";
 import { Dashboard, ExcelExport, Records, Reports, SchemaEditor, SettingsPage, Templates, UsersPage, ProjectsPage } from "./pages/Pages";
 
 function Login() {
@@ -110,6 +111,19 @@ function SuperAdmin({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function AdminOrSuper({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  if (user?.role !== "admin" && user?.role !== "super_admin") {
+    return (
+      <div className="glass panel">
+        <h2>Access denied</h2>
+        <p className="muted">Only Admin or Super Admin can open this page.</p>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -120,7 +134,8 @@ export default function App() {
         <Route path="records" element={<Records />} />
         <Route path="reports" element={<Reports />} />
         <Route path="export" element={<ExcelExport />} />
-        <Route path="templates" element={<SuperAdmin><Templates /></SuperAdmin>} />
+        <Route path="templates" element={<AdminOrSuper><Templates /></AdminOrSuper>} />
+        <Route path="requests" element={<AdminOrSuper><RequestsPage /></AdminOrSuper>} />
         <Route path="projects" element={<SuperAdmin><ProjectsPage /></SuperAdmin>} />
         <Route path="schema" element={<SuperAdmin><SchemaEditor /></SuperAdmin>} />
         <Route path="users" element={<SuperAdmin><UsersPage /></SuperAdmin>} />
