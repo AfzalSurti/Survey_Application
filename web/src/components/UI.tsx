@@ -1,4 +1,4 @@
-import { LayoutDashboard, ClipboardList, FileText, FileSpreadsheet, Braces, Users, Settings, Layers, LogOut, FolderKanban } from "lucide-react";
+import { LayoutDashboard, ClipboardList, Braces, Users, Settings, Layers, LogOut, FolderKanban } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import type { ReactNode } from "react";
@@ -10,20 +10,26 @@ export const StatusBadge = ({ status }: { status: string }) => (
   <span className={`badge ${status}`}>{status.replace("_", " ")}</span>
 );
 
-const entries = [
+/** Display labels for DB roles */
+export function roleLabel(role?: string) {
+  if (role === "surveyor") return "Field";
+  if (role === "admin") return "Admin";
+  if (role === "super_admin") return "Super Admin";
+  return role?.replace(/_/g, " ") || "—";
+}
+
+/** Super-admin nav order: 1 Dashboard, 2 Records, 3 Projects, 4 Users, 5 Schema, 6 Settings (+ Templates). */
+const commonEntries = [
   { to: "/app", label: "Dashboard", icon: LayoutDashboard },
   { to: "/app/records", label: "Records", icon: ClipboardList },
-  { to: "/app/reports", label: "Report generation", icon: FileText },
-  { to: "/app/export", label: "Excel export", icon: FileSpreadsheet },
 ];
 const superAdminEntries = [
-  { to: "/app/templates", label: "Templates", icon: Layers },
   { to: "/app/projects", label: "Projects", icon: FolderKanban },
-  { to: "/app/schema", label: "Schema editor", icon: Braces },
   { to: "/app/users", label: "Users", icon: Users },
+  { to: "/app/schema", label: "Schema editor", icon: Braces },
   { to: "/app/settings", label: "Settings", icon: Settings },
+  { to: "/app/templates", label: "Templates", icon: Layers },
 ];
-
 /** Buttons stay clickable when "disabled" so users get a clear reason. */
 export function ActionButton({
   children,
@@ -72,7 +78,7 @@ export function Header() {
         <div>
           <strong>{user?.name}</strong>
           <br />
-          <span className="muted">{user?.role?.replace("_", " ")}</span>
+          <span className="muted">{roleLabel(user?.role)}</span>
         </div>
         <div className="avatar">{user?.name?.[0] || "G"}</div>
         <NavLink className="button secondary" to="/" title="Landing page">
@@ -95,8 +101,9 @@ export function Header() {
 
 function Sidebar() {
   const { user } = useAuth();
-  const base = user?.role === "surveyor" ? entries.slice(0, 2) : entries;
-  const nav = [...base, ...(user?.role === "super_admin" ? superAdminEntries : [])];
+  let nav = commonEntries;
+  if (user?.role === "super_admin") nav = [...commonEntries, ...superAdminEntries];
+  else if (user?.role === "admin" || user?.role === "surveyor") nav = commonEntries;
   return (
     <aside className="glass sidebar">
       {nav.map(({ to, label, icon: Icon }) => (
