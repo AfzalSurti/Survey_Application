@@ -687,7 +687,7 @@ export function Templates() {
         <GlassPanel>
           <h2>Upload DOCX template</h2>
           <p className="muted">
-            Uploaded templates are stored in the database and used by <strong>Report generation</strong>. Use{" "}
+            Uploaded templates are stored in the database and used from <strong>Records → Preview Word Report</strong>. Use{" "}
             <code className="mono">{"{{ project_name }}"}</code>, <code className="mono">{"{{ chainage }}"}</code>,{" "}
             <code className="mono">{"{{ structure_category }}"}</code>, <code className="mono">{"{{ observations }}"}</code>,{" "}
             <code className="mono">{"{{ recommendations }}"}</code> placeholders in Word.
