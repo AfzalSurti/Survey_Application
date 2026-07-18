@@ -31,7 +31,10 @@ function Login() {
     setError("");
     const slowTimer = window.setTimeout(() => setWaking(true), 800);
     try {
-      await wakeServer({ maxMs: 90_000, onSlow: () => setWaking(true) });
+      await wakeServer({
+        maxMs: 90_000,
+        onAttempt: () => setWaking(true),
+      });
       await login(email.trim(), password);
       navigate(from.startsWith("/app") ? from : "/app");
     } catch (err) {
