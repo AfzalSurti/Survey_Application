@@ -30,7 +30,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Login
         logger.exception("Login database error")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database unavailable. Please try again in a moment.",
+            detail=f"Database unavailable ({type(exc).__name__}: {str(exc)[:180]})",
         ) from exc
 
     if user is None or not verify_password(body.password, user.password_hash):

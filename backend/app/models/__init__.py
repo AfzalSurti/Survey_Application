@@ -53,7 +53,10 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, name="user_role", values_callable=lambda enum: [e.value for e in enum]),
+        nullable=False,
+    )
     organization: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -121,7 +124,10 @@ class QuestionnaireSchema(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    module: Mapped[SurveyModule] = mapped_column(Enum(SurveyModule, name="survey_module"), nullable=False)
+    module: Mapped[SurveyModule] = mapped_column(
+        Enum(SurveyModule, name="survey_module", values_callable=lambda enum: [e.value for e in enum]),
+        nullable=False,
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -146,12 +152,20 @@ class SurveyRecord(Base):
     longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7), nullable=True)
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[SurveyStatus] = mapped_column(
-        Enum(SurveyStatus, name="survey_status"),
+        Enum(
+            SurveyStatus,
+            name="survey_status",
+            values_callable=lambda enum: [e.value for e in enum],
+        ),
         default=SurveyStatus.draft,
         nullable=False,
     )
     sync_status: Mapped[SyncStatus] = mapped_column(
-        Enum(SyncStatus, name="sync_status"),
+        Enum(
+            SyncStatus,
+            name="sync_status",
+            values_callable=lambda enum: [e.value for e in enum],
+        ),
         default=SyncStatus.pending,
         nullable=False,
     )
@@ -180,7 +194,12 @@ class SurveyPhoto(Base):
     drive_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     drive_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     sync_status: Mapped[SyncStatus] = mapped_column(
-        Enum(SyncStatus, name="sync_status", create_type=False),
+        Enum(
+            SyncStatus,
+            name="sync_status",
+            create_type=False,
+            values_callable=lambda enum: [e.value for e in enum],
+        ),
         default=SyncStatus.pending,
         nullable=False,
     )
@@ -195,7 +214,15 @@ class ReportTemplate(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Untitled template")
-    module: Mapped[SurveyModule] = mapped_column(Enum(SurveyModule, name="survey_module", create_type=False), nullable=False)
+    module: Mapped[SurveyModule] = mapped_column(
+        Enum(
+            SurveyModule,
+            name="survey_module",
+            create_type=False,
+            values_callable=lambda enum: [e.value for e in enum],
+        ),
+        nullable=False,
+    )
     template_docx_path: Mapped[str] = mapped_column(Text, nullable=False)
     docx_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

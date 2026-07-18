@@ -1,18 +1,28 @@
 from collections.abc import AsyncGenerator
+from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
 
 
 settings = get_settings()
 
+# Neon / PgBouncer (transaction pooler) + asyncpg: disable statement caching
+# and use unique prepared-statement names so ORM queries don't 503.
 engine = create_async_engine(
     settings.async_database_url,
     echo=settings.debug,
     pool_pre_ping=True,
-    connect_args={"ssl": True},
+    poolclass=NullPool,
+    connect_args={
+        "ssl": True,
+        "statement_cache_size": 0,
+        "prepared_statement_cache_size": 0,
+        "prepared_statement_name_func": lambda: f"__asyncpg_{uuid4().hex}__",
+    },
 )
 
 AsyncSessionLocal = async_sessionmaker(
