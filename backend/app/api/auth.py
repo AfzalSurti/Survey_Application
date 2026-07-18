@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -12,27 +13,43 @@ from app.core.security import (
     verify_password,
 )
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import User
 from app.schemas.auth import LoginRequest, LoginResponse, RefreshRequest, TokenPair, UserOut
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=LoginResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> LoginResponse:
-    result = await db.execute(select(User).where(User.email == body.email.lower()))
-    user = result.scalar_one_or_none()
+    try:
+        result = await db.execute(select(User).where(User.email == body.email.lower()))
+        user = result.scalar_one_or_none()
+    except Exception as exc:
+        logger.exception("Login database error")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable. Please try again in a moment.",
+        ) from exc
+
     if user is None or not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
-    tokens = TokenPair(
-        access_token=create_access_token(user.id, user.role),
-        refresh_token=create_refresh_token(user.id, user.role),
-    )
-    return LoginResponse(tokens=tokens, user=UserOut.model_validate(user))
+    try:
+        tokens = TokenPair(
+            access_token=create_access_token(user.id, user.role),
+            refresh_token=create_refresh_token(user.id, user.role),
+        )
+        return LoginResponse(tokens=tokens, user=UserOut.model_validate(user))
+    except Exception as exc:
+        logger.exception("Login token/response error")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not complete sign-in. Please try again.",
+        ) from exc
 
 
 @router.post("/refresh", response_model=TokenPair)

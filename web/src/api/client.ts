@@ -60,9 +60,23 @@ const api = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
     },
   });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    const detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail || body);
-    throw new Error(detail || `Request failed (${response.status})`);
+    const text = await response.text();
+    let detail = "";
+    try {
+      const body = JSON.parse(text) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+      else if (Array.isArray(body.detail)) {
+        detail = body.detail
+          .map((item) => (typeof item === "object" && item && "msg" in item ? String((item as { msg: string }).msg) : JSON.stringify(item)))
+          .join("; ");
+      } else if (body.detail != null) detail = JSON.stringify(body.detail);
+    } catch {
+      detail = text.trim();
+    }
+    if (!detail || detail === "{}" || detail === "[]" || detail === "Internal Server Error") {
+      detail = `Request failed (${response.status}). Please try again.`;
+    }
+    throw new Error(detail);
   }
   return response.status === 204 ? (undefined as T) : response.json();
 };

@@ -59,6 +59,20 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok", "app": cfg.app_name}
 
+    @app.get("/api/health/ready")
+    async def health_ready():
+        """Checks DB connectivity — used to diagnose login/cold-start issues."""
+        from sqlalchemy import text
+
+        from app.database import AsyncSessionLocal
+
+        try:
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+            return {"status": "ready", "database": "ok"}
+        except Exception as exc:
+            return {"status": "degraded", "database": "error", "detail": type(exc).__name__}
+
     return app
 
 
