@@ -61,7 +61,16 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    projects_created = relationship("Project", back_populates="creator")
+    projects_created = relationship(
+        "Project",
+        back_populates="creator",
+        foreign_keys="Project.created_by",
+    )
+    projects_as_key_engineer = relationship(
+        "Project",
+        back_populates="key_engineer",
+        foreign_keys="Project.key_engineer_id",
+    )
     pre_survey_entries = relationship("PreSurveyEntry", back_populates="surveyor")
     survey_records = relationship("SurveyRecord", back_populates="surveyor")
 
@@ -79,7 +88,7 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     creator = relationship("User", back_populates="projects_created", foreign_keys=[created_by])
-    key_engineer = relationship("User", foreign_keys=[key_engineer_id])
+    key_engineer = relationship("User", back_populates="projects_as_key_engineer", foreign_keys=[key_engineer_id])
     pre_survey_entries = relationship("PreSurveyEntry", back_populates="project")
     survey_records = relationship("SurveyRecord", back_populates="project")
     assignments = relationship("ProjectAssignment", back_populates="project", cascade="all, delete-orphan")
