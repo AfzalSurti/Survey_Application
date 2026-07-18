@@ -19,4 +19,4 @@ services:
       - key: DEBUG
         value: "false"
       - key: CORS_ORIGINS
-        value: https://gdrpl-survey-web.vercel.app
+        value: https://survey-application-teal.vercel.app,http://localhost:5173,http://localhost:8081
