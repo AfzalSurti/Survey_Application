@@ -1,3 +1,5 @@
+import { apiBaseUrl } from "../lib/wakeServer";
+
 export type Role = "surveyor" | "admin" | "super_admin";
 export type User = { id: string; name: string; email: string; role: Role; organization?: string; is_active: boolean; created_at?: string };
 export type Project = {
@@ -43,8 +45,8 @@ export type DashboardSummary = {
   pending_items: RecordItem[];
 };
 
-/** Production API base (Render). Local/dev uses Vite proxy `/api`. */
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
+/** Production API base (Render). Falls back to baked Render URL if env missing. */
+const API_BASE = apiBaseUrl();
 
 const api = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
   const token = localStorage.getItem("access_token");

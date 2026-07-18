@@ -117,6 +117,10 @@ h1,h2,h3 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: 
   font-weight: 600;
   font-size: .9rem;
 }
+.wake-retry {
+  margin-top: 18px;
+  min-width: 180px;
+}
 .wake-dot {
   width: 7px;
   height: 7px;

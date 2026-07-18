@@ -1,35 +1,45 @@
-/** Ping Render until the API wakes (cold start can take ~30–60s). */
+/** Production Render API — used when VITE_API_URL is missing at build time. */
+export const PRODUCTION_API_URL = "https://survey-application-4r6q.onrender.com";
 
-const API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || "";
+export function apiBaseUrl(): string {
+  const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "").trim();
+  return fromEnv || PRODUCTION_API_URL;
+}
 
+/** Ping Render until /api/health succeeds. Does not open the app on failure. */
 export async function wakeServer(options?: {
   maxMs?: number;
-  onSlow?: () => void;
+  onAttempt?: (attempt: number) => void;
   signal?: AbortSignal;
 }): Promise<boolean> {
-  const maxMs = options?.maxMs ?? 90_000;
+  const maxMs = options?.maxMs ?? 120_000;
+  const base = apiBaseUrl();
   const started = Date.now();
-  let slowFired = false;
+  let attempt = 0;
 
   while (Date.now() - started < maxMs) {
     if (options?.signal?.aborted) return false;
-    if (!slowFired && Date.now() - started > 900) {
-      slowFired = true;
-      options?.onSlow?.();
-    }
+    attempt += 1;
+    options?.onAttempt?.(attempt);
     try {
       const controller = new AbortController();
-      const timer = window.setTimeout(() => controller.abort(), 12_000);
-      const res = await fetch(`${API_BASE}/api/health`, {
-        signal: options?.signal ?? controller.signal,
-        cache: "no-store",
-      });
-      window.clearTimeout(timer);
-      if (res.ok) return true;
+      const onAbort = () => controller.abort();
+      options?.signal?.addEventListener("abort", onAbort);
+      const timer = window.setTimeout(() => controller.abort(), 15_000);
+      try {
+        const res = await fetch(`${base}/api/health`, {
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        if (res.ok) return true;
+      } finally {
+        window.clearTimeout(timer);
+        options?.signal?.removeEventListener("abort", onAbort);
+      }
     } catch {
-      /* retry while Render boots */
+      /* Render cold start / network — keep retrying */
     }
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 2500));
   }
   return false;
 }
