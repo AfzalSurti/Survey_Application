@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ServerWakeScreen } from "./ServerWakeScreen";
-import { apiBaseUrl, wakeServer } from "../lib/wakeServer";
+import { PRODUCTION_API_URL, wakeServer } from "../lib/wakeServer";
 
 /**
  * Blocks the entire app (including landing) until the Render API is healthy.
@@ -36,7 +36,7 @@ export function ServerGate({ children }: { children: ReactNode }) {
   if (phase === "failed") {
     return (
       <ServerWakeScreen
-        detail={`Could not reach the server at ${apiBaseUrl()}. It may still be starting — tap Retry.`}
+        detail={`Could not reach the server at ${PRODUCTION_API_URL}. It may still be starting — tap Retry.`}
         statusLabel="Unavailable"
         actionLabel="Retry connection"
         onAction={() => {

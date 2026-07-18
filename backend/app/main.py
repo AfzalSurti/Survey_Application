@@ -31,14 +31,17 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # Bearer JWT only (no cookies) — allow any browser origin so Vercel/local
+    # never get stuck when CORS_ORIGINS env drifts on Render.
+    origins = cfg.cors_origin_list
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=cfg.cors_origin_list,
-        # Preview + production Vercel hosts (env list alone often drifts).
-        allow_origin_regex=r"https://.*\.vercel\.app",
-        allow_credentials=True,
+        allow_origins=origins if origins else ["*"],
+        allow_origin_regex=r"https://.*\.vercel\.app|http://(localhost|127\.0\.0\.1):\d+",
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["*"],
     )
     app.include_router(auth.router)
     app.include_router(users.router)

@@ -1,12 +1,21 @@
-/** Production Render API — used when VITE_API_URL is missing at build time. */
+/** Production Render API — used by mobile / direct calls; web prod uses Vercel proxy. */
 export const PRODUCTION_API_URL = "https://survey-application-4r6q.onrender.com";
 
+/**
+ * Browser API base.
+ * - Production web: same-origin "" so Vercel rewrites /api → Render (no CORS).
+ * - Dev: VITE_API_URL or local backend.
+ */
 export function apiBaseUrl(): string {
   const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "").trim();
-  return fromEnv || PRODUCTION_API_URL;
+  if (import.meta.env.PROD) {
+    if (fromEnv && /localhost|127\.0\.0\.1/.test(fromEnv)) return fromEnv;
+    return "";
+  }
+  return fromEnv || "http://localhost:8000";
 }
 
-/** Ping Render until /api/health succeeds. Does not open the app on failure. */
+/** Ping API until /api/health succeeds. Does not open the app on failure. */
 export async function wakeServer(options?: {
   maxMs?: number;
   onAttempt?: (attempt: number) => void;
