@@ -1,4 +1,5 @@
 import * as SQLite from "expo-sqlite";
+import { newId } from "@/lib/id";
 import { SurveyRecord } from "@/types";
 
 let db: SQLite.SQLiteDatabase;
@@ -68,7 +69,7 @@ const database = async () => db ?? initDb();
 
 export async function savePreSurvey(values: Record<string, string>) {
   const d = await database();
-  const id = crypto.randomUUID();
+  const id = newId();
   await d.runAsync(
     "INSERT OR REPLACE INTO pre_survey (id, head_surveyor, organization, project_id, project_name, project_number, highway_number, synced, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
     id,
@@ -109,7 +110,7 @@ export async function saveRecord(record: SurveyRecord & { projectId?: string }) 
   );
   await d.runAsync(
     "INSERT INTO sync_queue VALUES (?, 'survey_record', ?, ?)",
-    crypto.randomUUID(),
+    newId(),
     record.id,
     new Date().toISOString(),
   );
@@ -119,7 +120,7 @@ export async function addPhoto(recordId: string, uri: string) {
   const d = await database();
   await d.runAsync(
     "INSERT INTO survey_photos VALUES (?, ?, ?, ?, 'pending', ?)",
-    crypto.randomUUID(),
+    newId(),
     recordId,
     uri.split("/").pop() ?? "photo.jpg",
     uri,

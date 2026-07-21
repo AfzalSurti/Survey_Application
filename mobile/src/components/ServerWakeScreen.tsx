@@ -1,7 +1,9 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 export function ServerWakeScreen({ detail }: { detail?: string }) {
+  const insets = useSafeAreaInsets();
   const pulse = useRef(new Animated.Value(1)).current;
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
@@ -64,7 +66,7 @@ export function ServerWakeScreen({ detail }: { detail?: string }) {
   });
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.orbWrap}>
         <Animated.View style={[styles.ring, styles.ringGreen, ringStyle(ring1)]} />
         <Animated.View style={[styles.ring, styles.ringBlue, ringStyle(ring2)]} />
