@@ -1,12 +1,37 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
+} from "react-native";
 import * as Location from "expo-location";
-import { CameraView, useCameraPermissions } from "expo-camera";
+import { CommonActions } from "@react-navigation/native";
 import { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { api, login, logout } from "@/api/client";
 import { addPhoto, cacheSchema, cachedSchema, dashboardCounts, getPreSurvey, records, savePreSurvey, saveRecord } from "@/db";
-import { Button, Field, GlassCard, Header, Label } from "@/components/UI";
+import {
+  Body,
+  Button,
+  ChoicePill,
+  EmptyState,
+  Field,
+  GlassCard,
+  Hero,
+  Label,
+  Meta,
+  Screen,
+  SectionTitle,
+  StatusChip,
+} from "@/components/UI";
+import { PhotoCaptureSession } from "@/components/PhotoCaptureSession";
 import { ServerWakeScreen } from "@/components/ServerWakeScreen";
 import { useTheme } from "@/context/ThemeContext";
 import {
@@ -16,6 +41,7 @@ import {
   UTILITY_CATEGORIES,
   UTILITY_SURVEY_DESCRIPTION,
 } from "@/content/copy";
+import { newId } from "@/lib/id";
 import { wakeServer } from "@/lib/wakeServer";
 import { FormSchema, Question, QuestionType, SurveyRecord } from "@/types";
 import { syncPending } from "@/sync/engine";
@@ -81,16 +107,6 @@ function questionsForCategory(schemaJson: Record<string, unknown> | null | undef
   return fromCat;
 }
 
-function Screen({ children, subtitle }: React.PropsWithChildren<{ subtitle?: string }>) {
-  const { theme } = useTheme();
-  return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
-      <Header subtitle={subtitle} />
-      <ScrollView contentContainerStyle={styles.content}>{children}</ScrollView>
-    </View>
-  );
-}
-
 function reasonAlert(title: string, message: string) {
   Alert.alert(title, message);
 }
@@ -125,20 +141,27 @@ export function LoginScreen({ navigation }: StackProps<"Login">) {
   };
 
   if (waking) {
-    return (
-      <ServerWakeScreen detail="Waking up server — signing you in can take up to a minute on first load…" />
-    );
+    return <ServerWakeScreen detail="Waking up server — signing you in can take up to a minute on first load…" />;
   }
 
   return (
-    <Screen subtitle="Geo Design and Research Pvt Ltd">
+    <Screen subtitle="Geo Design and Research Pvt Ltd" keyboard>
       <GlassCard>
-        <Text style={styles.hero}>Field survey, even offline.</Text>
+        <Hero>Field survey, even offline.</Hero>
+        <Meta>Sign in with your GDRPL field account to capture structure and utility surveys.</Meta>
         <Label>Email</Label>
-        <Field value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="surveyor@gdrpl.com" />
+        <Field
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="email-address"
+          placeholder="surveyor@gdrpl.com"
+          returnKeyType="next"
+        />
         <Label>Password</Label>
-        <Field value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" />
-        <Button title={loading ? "Signing in…" : "Sign in"} onPress={signIn} disabled={loading} disabledReason="Sign in is already in progress." />
+        <Field value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" returnKeyType="go" onSubmitEditing={signIn} />
+        <Button title={loading ? "Signing in…" : "Sign in"} onPress={signIn} disabled={loading} loading={loading} disabledReason="Sign in is already in progress." />
       </GlassCard>
     </Screen>
   );
@@ -146,31 +169,39 @@ export function LoginScreen({ navigation }: StackProps<"Login">) {
 
 export function CompanyIntroScreen({ navigation }: StackProps<"CompanyIntro">) {
   return (
-    <Screen subtitle="Geo Design and Research Pvt Ltd Field Survey Application">
+    <Screen subtitle="Field Survey Application" onBack={() => navigation.navigate("Main")}>
       <GlassCard>
-        <Text style={styles.hero}>Introduction of Company</Text>
-        <Text style={styles.body}>{COMPANY_INTRO}</Text>
+        <Hero>About GDRPL</Hero>
+        <Body>{COMPANY_INTRO}</Body>
         <Button title="Type of Survey" onPress={() => navigation.navigate("SurveyType")} />
-        <Button title="Go to Dashboard" onPress={() => navigation.navigate("Main")} />
+        <Button title="Go to Dashboard" variant="secondary" onPress={() => navigation.navigate("Main")} />
       </GlassCard>
     </Screen>
   );
 }
 
 export function SurveyTypeScreen({ navigation }: StackProps<"SurveyType">) {
+  const { theme } = useTheme();
   return (
-    <Screen>
-      <Text style={styles.hero}>Type of Survey</Text>
+    <Screen onBack={() => navigation.goBack()}>
+      <Hero>Type of Survey</Hero>
+      <Meta>Choose the survey module that matches today’s field work.</Meta>
       <Pressable onPress={() => navigation.navigate("StructureBrief")}>
         <GlassCard style={styles.choice}>
-          <Text style={styles.choiceText}>Structure Inventory Survey</Text>
-          <Text style={styles.meta}>Highway structures inventory and condition assessment</Text>
+          <View style={[styles.choiceBadge, { backgroundColor: theme.successSoft }]}>
+            <Text style={{ color: theme.accentSecondary, fontWeight: "800" }}>01</Text>
+          </View>
+          <Text style={[styles.choiceText, { color: theme.ink }]}>Structure Inventory Survey</Text>
+          <Meta>Highway structures inventory and condition assessment</Meta>
         </GlassCard>
       </Pressable>
       <Pressable onPress={() => navigation.navigate("UtilityBrief")}>
         <GlassCard style={styles.choice}>
-          <Text style={styles.choiceText}>Utility Survey</Text>
-          <Text style={styles.meta}>Existing utilities for shifting assessment</Text>
+          <View style={[styles.choiceBadge, { backgroundColor: "rgba(27,79,140,0.12)" }]}>
+            <Text style={{ color: theme.accentPrimary, fontWeight: "800" }}>02</Text>
+          </View>
+          <Text style={[styles.choiceText, { color: theme.ink }]}>Utility Survey</Text>
+          <Meta>Existing utilities for shifting assessment</Meta>
         </GlassCard>
       </Pressable>
     </Screen>
@@ -178,10 +209,12 @@ export function SurveyTypeScreen({ navigation }: StackProps<"SurveyType">) {
 }
 
 export function StructureBriefScreen({ navigation }: StackProps<"StructureBrief">) {
+  const { theme } = useTheme();
   const [projects, setProjects] = useState<{ id: string; name: string; project_number: string; highway_number: string }[]>([]);
   const [projectId, setProjectId] = useState("");
   const [values, setValues] = useState({ headSurveyor: "", organization: "GDRPL" });
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [showFullDescription, setShowFullDescription] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -205,24 +238,16 @@ export function StructureBriefScreen({ navigation }: StackProps<"StructureBrief"
   const selected = projects.find((p) => p.id === projectId);
 
   const start = async () => {
-    if (loadingProjects) {
-      return reasonAlert("Please wait", "Assigned projects are still loading.");
-    }
+    if (loadingProjects) return reasonAlert("Please wait", "Assigned projects are still loading.");
     if (!projects.length) {
       return reasonAlert(
         "No assigned project",
-        "Super admin has not assigned any project to your account yet. Contact your admin, then pull to refresh after logging in again.",
+        "Super admin has not assigned any project to your account yet. Contact your admin, then try again.",
       );
     }
-    if (!projectId || !selected) {
-      return reasonAlert("Project required", "Select one assigned project before starting the structure inventory form.");
-    }
-    if (!values.headSurveyor.trim()) {
-      return reasonAlert("Head surveyor required", "Enter the name of the head surveyor to continue.");
-    }
-    if (!values.organization.trim()) {
-      return reasonAlert("Organization required", "Enter the organization name to continue.");
-    }
+    if (!projectId || !selected) return reasonAlert("Project required", "Select one assigned project before starting the form.");
+    if (!values.headSurveyor.trim()) return reasonAlert("Head surveyor required", "Enter the name of the head surveyor to continue.");
+    if (!values.organization.trim()) return reasonAlert("Organization required", "Enter the organization name to continue.");
     await savePreSurvey({
       headSurveyor: values.headSurveyor.trim(),
       organization: values.organization.trim(),
@@ -244,39 +269,49 @@ export function StructureBriefScreen({ navigation }: StackProps<"StructureBrief"
   };
 
   return (
-    <Screen>
+    <Screen onBack={() => navigation.goBack()} keyboard>
       <GlassCard>
-        <Text style={styles.hero}>Structure Inventory Survey</Text>
-        <Text style={styles.sectionTitle}>Description of the Survey</Text>
-        <Text style={styles.body}>{STRUCTURE_SURVEY_DESCRIPTION}</Text>
+        <Hero>Structure Inventory</Hero>
+        <SectionTitle>Description</SectionTitle>
+        <Body>
+          {showFullDescription
+            ? STRUCTURE_SURVEY_DESCRIPTION
+            : `${STRUCTURE_SURVEY_DESCRIPTION.slice(0, 180).trim()}…`}
+        </Body>
+        <Button
+          title={showFullDescription ? "Hide full description" : "Read full description"}
+          variant="ghost"
+          onPress={() => setShowFullDescription((v) => !v)}
+        />
       </GlassCard>
       <GlassCard>
-        <Text style={styles.sectionTitle}>Pre Survey Form (Fill Only One Time)</Text>
-        <Text style={styles.meta}>Only projects assigned by super admin appear here.</Text>
+        <SectionTitle>Pre-survey (once per session)</SectionTitle>
+        <Meta>Only projects assigned by super admin appear here.</Meta>
         <Label>Project</Label>
+        {loadingProjects ? <ActivityIndicator color={theme.accentPrimary} style={{ marginVertical: 12 }} /> : null}
         <View style={styles.options}>
           {projects.map((p) => (
-            <Pressable key={p.id} onPress={() => setProjectId(p.id)} style={[styles.pill, projectId === p.id && styles.selected]}>
-              <Text>
-                {p.name} ({p.project_number})
-              </Text>
-            </Pressable>
+            <ChoicePill key={p.id} label={`${p.name} (${p.project_number})`} selected={projectId === p.id} onPress={() => setProjectId(p.id)} />
           ))}
         </View>
-        {!projects.length && !loadingProjects ? <Text style={styles.meta}>No assigned projects yet.</Text> : null}
+        {!projects.length && !loadingProjects ? (
+          <EmptyState title="No projects assigned" message="Ask your super admin to assign a project to this field account." />
+        ) : null}
         <Label>Name of the Head Surveyor</Label>
         <Field value={values.headSurveyor} onChangeText={(v) => setValues((s) => ({ ...s, headSurveyor: v }))} placeholder="Head surveyor name" />
         <Label>Organization</Label>
         <Field value={values.organization} onChangeText={(v) => setValues((s) => ({ ...s, organization: v }))} />
         {selected ? (
-          <Text style={styles.meta}>
-            Project Name: {selected.name}{"\n"}
-            Project Number: {selected.project_number}{"\n"}
-            Highway Number: {selected.highway_number}
-          </Text>
+          <View style={[styles.infoBox, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+            <Meta>
+              Project: {selected.name}{"\n"}
+              Number: {selected.project_number}{"\n"}
+              Highway: {selected.highway_number}
+            </Meta>
+          </View>
         ) : null}
         <Button
-          title="Submit the Pre-Fill Form and Start Structure Inventory Form"
+          title="Continue to structure types"
           onPress={start}
           disabled={loadingProjects}
           disabledReason="Assigned projects are still loading. Wait a moment, then try again."
@@ -288,13 +323,13 @@ export function StructureBriefScreen({ navigation }: StackProps<"StructureBrief"
 
 export function UtilityBriefScreen({ navigation }: StackProps<"UtilityBrief">) {
   return (
-    <Screen>
+    <Screen onBack={() => navigation.goBack()}>
       <GlassCard>
-        <Text style={styles.hero}>Utility Survey</Text>
-        <Text style={styles.sectionTitle}>Description of the Survey</Text>
-        <Text style={styles.body}>{UTILITY_SURVEY_DESCRIPTION}</Text>
+        <Hero>Utility Survey</Hero>
+        <SectionTitle>Description</SectionTitle>
+        <Body>{UTILITY_SURVEY_DESCRIPTION}</Body>
         <Button
-          title="Start Utility Form"
+          title="Start utility form"
           onPress={() =>
             navigation.navigate("DynamicForm", {
               module: "utility_shifting",
@@ -313,23 +348,32 @@ export function PreSurveyScreen({ navigation }: StackProps<"PreSurvey">) {
   useEffect(() => {
     navigation.replace("StructureBrief");
   }, [navigation]);
-  return null;
+  return <ServerWakeScreen detail="Opening pre-survey…" />;
 }
 
 export function CategoryScreen({ navigation, route }: StackProps<"Category">) {
+  const { theme } = useTheme();
   const { module } = route.params;
   const list = module === "utility_shifting" ? UTILITY_CATEGORIES : STRUCTURE_CATEGORIES;
   return (
-    <Screen>
-      <Text style={styles.hero}>Select structure type</Text>
-      <Text style={styles.meta}>Choose the structure that matches the field asset.</Text>
-      {list.map((item) => (
+    <Screen onBack={() => navigation.goBack()}>
+      <Hero>Select structure type</Hero>
+      <Meta>Choose the structure that matches the field asset.</Meta>
+      {list.map((item, index) => (
         <Pressable
           key={item.key}
           onPress={() => navigation.navigate("DynamicForm", { module, category: item.key, categoryLabel: item.label })}
         >
           <GlassCard style={styles.category}>
-            <Text style={styles.choiceText}>{item.label}</Text>
+            <View style={styles.categoryRow}>
+              <View style={[styles.choiceBadge, { backgroundColor: theme.successSoft }]}>
+                <Text style={{ color: theme.accentSecondary, fontWeight: "800" }}>{String(index + 1).padStart(2, "0")}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.choiceText, { color: theme.ink }]}>{item.label}</Text>
+                <Text style={{ color: theme.accentPrimary, fontWeight: "800", marginTop: 8, fontSize: 15 }}>Open form →</Text>
+              </View>
+            </View>
           </GlassCard>
         </Pressable>
       ))}
@@ -338,17 +382,16 @@ export function CategoryScreen({ navigation, route }: StackProps<"Category">) {
 }
 
 export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm">) {
+  const { theme } = useTheme();
   const { module, category, categoryLabel } = route.params;
   const [schema, setSchema] = useState<FormSchema>(fallback);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">("loading");
   const [loadError, setLoadError] = useState("");
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const [photos, setPhotos] = useState<string[]>([]);
-  const [cameraOpen, setCameraOpen] = useState(false);
-  const [permission, requestPermission] = useCameraPermissions();
+  const [photoSessionOpen, setPhotoSessionOpen] = useState(false);
   const [coords, setCoords] = useState<Location.LocationObjectCoords | null>(null);
   const [gpsStatus, setGpsStatus] = useState("Locating…");
-  const cameraRef = useRef<CameraView>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -364,7 +407,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
         if (!questions.length) {
           setLoadState("error");
           setLoadError(
-            `No questions found for category "${category}". The form stayed on this screen — it did not auto-submit. Ask super admin to publish the schema, or pick another structure type.`,
+            `No questions found for category "${category}". Ask super admin to publish the schema, or pick another structure type.`,
           );
           return;
         }
@@ -382,7 +425,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
               setLoadState("ready");
             } else {
               setLoadState("error");
-              setLoadError("Cached schema has no questions for this category. Connect online once to refresh the questionnaire.");
+              setLoadError("Cached schema has no questions for this category. Connect online once to refresh.");
             }
           } catch {
             setLoadState("error");
@@ -390,7 +433,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
           }
         } else {
           setLoadState("error");
-          setLoadError("Could not download the questionnaire and no offline cache exists. Connect to the internet once, then reopen this form.");
+          setLoadError("Could not download the questionnaire and no offline cache exists. Connect once, then reopen.");
         }
       }
     })();
@@ -399,7 +442,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       try {
         const locationPermission = await Location.requestForegroundPermissionsAsync();
         if (locationPermission.status !== "granted") {
-          if (!cancelled) setGpsStatus("GPS permission denied — you can still fill answers and submit.");
+          if (!cancelled) setGpsStatus("GPS permission denied — you can still fill and submit.");
           return;
         }
         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
@@ -408,7 +451,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
           setGpsStatus(`${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`);
         }
       } catch {
-        if (!cancelled) setGpsStatus("GPS unavailable — you can still fill answers and submit.");
+        if (!cancelled) setGpsStatus("GPS unavailable — you can still fill and submit.");
       }
     })();
 
@@ -419,13 +462,9 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
 
   const setAnswer = (id: string, value: unknown) => setAnswers((v) => ({ ...v, [id]: value }));
 
-  const capture = async (camera: CameraView | null) => {
-    const photo = await camera?.takePictureAsync({ quality: 0.7 });
-    if (photo?.uri) {
-      setPhotos((p) => [...p, photo.uri]);
-      setCameraOpen(false);
-    }
-  };
+  const answerCount = Object.keys(answers).filter((k) => answers[k] !== undefined && answers[k] !== "").length;
+  const answerTotal = Math.max(schema.questions.filter((q) => q.type !== "photo_group").length, 1);
+  const progressPct = Math.min(100, Math.round((answerCount / answerTotal) * 100));
 
   const submit = async () => {
     if (loadState !== "ready") {
@@ -447,7 +486,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       return reasonAlert("More photos required", `Capture at least ${minimum} photos before submit. You currently have ${photos.length}.`);
     }
     const record: SurveyRecord = {
-      id: crypto.randomUUID(),
+      id: newId(),
       module,
       category,
       chainage: String(answers.chainage ?? ""),
@@ -473,23 +512,27 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
 
   const renderQuestion = (q: Question) => {
     if (q.type === "photo_group") {
+      const min = q.minPhotos ?? 4;
       return (
         <View key={q.id} style={styles.qBlock}>
           <Label>
-            {q.label} ({photos.length}/{q.minPhotos ?? 4})
+            {q.label} ({photos.length}/{min})
           </Label>
-          <Button
-            title="Open camera"
-            onPress={async () => {
-              if (!permission?.granted) {
-                const res = await requestPermission();
-                if (!res.granted) {
-                  return reasonAlert("Camera blocked", "Camera permission is required to capture structure photographs. Enable it in system settings.");
-                }
-              }
-              setCameraOpen(true);
-            }}
-          />
+          <Meta>Opens a photo session — pick a camera app or gallery. Stays open until {min} photos are captured.</Meta>
+          <View style={styles.photoRow}>
+            {photos.map((uri) => (
+              <View key={uri} style={styles.thumbWrap}>
+                <Image source={{ uri }} style={styles.thumb} />
+                <Pressable
+                  style={styles.thumbRemove}
+                  onPress={() => setPhotos((list) => list.filter((p) => p !== uri))}
+                >
+                  <Text style={styles.thumbRemoveText}>×</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+          <Button title="Add photos" variant="secondary" onPress={() => setPhotoSessionOpen(true)} />
         </View>
       );
     }
@@ -502,9 +545,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
           </Label>
           <View style={styles.options}>
             {(q.options ?? []).map((option) => (
-              <Pressable key={option} onPress={() => setAnswer(q.id, option)} style={[styles.pill, answers[q.id] === option && styles.selected]}>
-                <Text>{option}</Text>
-              </Pressable>
+              <ChoicePill key={option} label={option} selected={answers[q.id] === option} onPress={() => setAnswer(q.id, option)} />
             ))}
           </View>
         </View>
@@ -521,18 +562,17 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
             {(q.options ?? []).map((option) => {
               const selected = ((answers[q.id] as string[]) ?? []).includes(option);
               return (
-                <Pressable
+                <ChoicePill
                   key={option}
+                  label={option}
+                  selected={selected}
                   onPress={() =>
                     setAnswer(
                       q.id,
                       selected ? (answers[q.id] as string[]).filter((x) => x !== option) : [...((answers[q.id] as string[]) ?? []), option],
                     )
                   }
-                  style={[styles.pill, selected && styles.selected]}
-                >
-                  <Text>{option}</Text>
-                </Pressable>
+                />
               );
             })}
           </View>
@@ -564,100 +604,180 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
   };
 
   return (
-    <Screen>
-      <View style={styles.formRow}>
-        <View style={styles.rail}>
-          <View
-            style={[
-              styles.railFill,
-              {
-                height: `${Math.min(
-                  100,
-                  (Object.keys(answers).length / Math.max(schema.questions.filter((q) => q.type !== "photo_group").length, 1)) * 100,
-                )}%`,
-              },
-            ]}
-          />
-        </View>
-        <GlassCard style={styles.form}>
-          <Text style={styles.hero}>{categoryLabel || category}</Text>
-          <Text style={styles.meta}>
-            GPS: {gpsStatus}
-            {"\n"}Captured: {new Date().toLocaleString()}
-            {"\n"}Location is captured in the background — this screen stays open until you submit.
-          </Text>
-          {loadState === "loading" ? <Text style={styles.meta}>Loading questionnaire for this structure type…</Text> : null}
-          {loadState === "error" ? <Text style={styles.error}>{loadError}</Text> : null}
-          {loadState === "ready" ? schema.questions.map(renderQuestion) : null}
-          <Button
-            title="Submit survey"
-            onPress={submit}
-            disabled={loadState !== "ready"}
-            disabledReason={loadError || "Wait until the questionnaire finishes loading. GPS does not submit the form for you."}
-          />
-        </GlassCard>
+    <Screen onBack={() => navigation.goBack()} keyboard>
+      <View style={[styles.progressTrack, { backgroundColor: "rgba(111,168,62,.18)" }]}>
+        <View style={[styles.progressFill, { width: `${progressPct}%`, backgroundColor: theme.accentSecondary }]} />
       </View>
-      <Modal visible={cameraOpen} animationType="slide">
-        <CameraView style={{ flex: 1 }} facing="back" ref={cameraRef}>
-          <View style={styles.camera}>
-            <Button title="Capture photo" onPress={() => capture(cameraRef.current)} />
-            <Button title="Cancel" onPress={() => setCameraOpen(false)} />
+      <Meta>{progressPct}% complete · GPS: {gpsStatus}</Meta>
+      <GlassCard>
+        <Hero>{categoryLabel || category}</Hero>
+        <Meta>Captured: {new Date().toLocaleString()}</Meta>
+        {loadState === "loading" ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={theme.accentPrimary} />
+            <Meta>Loading questionnaire…</Meta>
           </View>
-        </CameraView>
-      </Modal>
+        ) : null}
+        {loadState === "error" ? <Text style={[styles.error, { color: theme.danger }]}>{loadError}</Text> : null}
+        {loadState === "ready" ? schema.questions.map(renderQuestion) : null}
+        <Button
+          title="Submit survey"
+          onPress={submit}
+          disabled={loadState !== "ready"}
+          disabledReason={loadError || "Wait until the questionnaire finishes loading."}
+        />
+      </GlassCard>
+      <PhotoCaptureSession
+        visible={photoSessionOpen}
+        minPhotos={schema.questions.find((q) => q.type === "photo_group")?.minPhotos ?? 4}
+        photos={photos}
+        onChange={setPhotos}
+        onClose={() => setPhotoSessionOpen(false)}
+      />
     </Screen>
   );
 }
 
 export function DashboardScreen({ navigation }: TabProps<"Dashboard">) {
+  const { theme } = useTheme();
   const [counts, setCounts] = useState<{ total: number; pending: number; completed: number; photos: number }>();
-  const load = useCallback(() => {
-    dashboardCounts().then((value) => {
-      if (value) setCounts(value);
-    });
+  const [refreshing, setRefreshing] = useState(false);
+  const load = useCallback(async () => {
+    const value = await dashboardCounts();
+    if (value) setCounts(value);
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const metrics = useMemo(
+    () => [
+      ["Total Structures", counts?.total ?? 0, theme.accentPrimary],
+      ["Pending Sync", counts?.pending ?? 0, theme.warn],
+      ["Completed", counts?.completed ?? 0, theme.accentSecondary],
+      ["Total Photos", counts?.photos ?? 0, theme.ink],
+    ] as const,
+    [counts, theme],
+  );
+
   return (
-    <Screen>
-      <Text style={styles.hero}>Today’s overview</Text>
+    <Screen
+      scroll
+      right={
+        <Pressable onPress={() => { setRefreshing(true); void load().finally(() => setRefreshing(false)); }}>
+          <Text style={{ color: theme.accentPrimary, fontWeight: "700" }}>{refreshing ? "…" : "Refresh"}</Text>
+        </Pressable>
+      }
+    >
+      <Hero>Today’s overview</Hero>
+      <Meta>Local field totals stored on this device.</Meta>
       <View style={styles.grid}>
-        {[
-          ["Total Structures", counts?.total ?? 0],
-          ["Pending Sync", counts?.pending ?? 0],
-          ["Completed", counts?.completed ?? 0],
-          ["Total Photos", counts?.photos ?? 0],
-        ].map(([label, value]) => (
-          <GlassCard key={label as string} style={styles.metric}>
-            <Text style={styles.number}>{value}</Text>
-            <Text>{label}</Text>
+        {metrics.map(([label, value, color]) => (
+          <GlassCard key={label} style={styles.metric}>
+            <Text style={[styles.number, { color }]}>{value}</Text>
+            <Text style={{ color: theme.muted, fontWeight: "700", fontSize: 13 }}>{label}</Text>
           </GlassCard>
         ))}
       </View>
-      <Button title="Start new survey" onPress={() => navigation.getParent()?.navigate("CompanyIntro")} />
+      {!counts?.total ? (
+        <EmptyState
+          title="No surveys yet"
+          message="Add a new structure survey, or submit the entire project when field work is finished."
+        />
+      ) : null}
+      <Button
+        title="New Structure"
+        onPress={async () => {
+          const saved = await getPreSurvey();
+          if (saved?.project_id) {
+            navigation.getParent()?.navigate("Category", { module: "structure_inventory" });
+          } else {
+            navigation.getParent()?.navigate("StructureBrief");
+          }
+        }}
+      />
+      <Button
+        title="Submit Entire Project Survey"
+        variant="secondary"
+        onPress={() => {
+          Alert.alert(
+            "Submit entire project?",
+            "This ends the current field session and returns you to sign-in after you confirm. Sync pending records from the Sync tab first if needed.",
+            [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Go to Sign in",
+                onPress: async () => {
+                  await logout();
+                  navigation.getParent()?.dispatch(
+                    CommonActions.reset({
+                      index: 0,
+                      routes: [{ name: "Login" }],
+                    }),
+                  );
+                },
+              },
+            ],
+          );
+        }}
+      />
+      <Button
+        title="Other survey types"
+        variant="ghost"
+        onPress={() => navigation.getParent()?.navigate("CompanyIntro")}
+      />
     </Screen>
   );
 }
 
 export function SurveyListScreen(_: TabProps<"Surveys">) {
+  const { theme } = useTheme();
   const [list, setList] = useState<(SurveyRecord & { responses_json: string })[]>([]);
   const [search, setSearch] = useState("");
-  useEffect(() => {
-    records().then(setList);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    setList(await records());
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const filtered = list.filter((r) => `${r.category} ${r.chainage}`.toLowerCase().includes(search.toLowerCase()));
+
   return (
-    <Screen>
+    <Screen scroll={false}>
+      <Hero>Surveys</Hero>
       <Field placeholder="Search category or chainage" value={search} onChangeText={setSearch} />
       <FlatList
-        scrollEnabled={false}
-        data={list.filter((r) => `${r.category} ${r.chainage}`.toLowerCase().includes(search.toLowerCase()))}
+        data={filtered}
         keyExtractor={(r) => r.id}
+        style={{ flex: 1 }}
+        contentContainerStyle={{ gap: 10, paddingBottom: 24, flexGrow: 1 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await load();
+              setRefreshing(false);
+            }}
+            tintColor={theme.accentPrimary}
+          />
+        }
+        ListEmptyComponent={
+          <EmptyState title="No records yet" message="Completed surveys will appear here for review and sync." />
+        }
         renderItem={({ item }) => (
           <GlassCard style={styles.item}>
-            <Text style={styles.choiceText}>{item.category}</Text>
-            <Text>
+            <Text style={[styles.choiceText, { color: theme.ink }]}>{item.category.replace(/_/g, " ")}</Text>
+            <Text style={{ color: theme.cardText, marginTop: 4 }}>
               Chainage {item.chainage || "—"} · {item.status}
             </Text>
-            <Text style={styles.meta}>{item.syncStatus}</Text>
+            <View style={{ marginTop: 8 }}>
+              <StatusChip status={item.syncStatus} />
+            </View>
           </GlassCard>
         )}
       />
@@ -666,41 +786,71 @@ export function SurveyListScreen(_: TabProps<"Surveys">) {
 }
 
 export function SyncScreen(_: TabProps<"Sync">) {
-  const [message, setMessage] = useState("Ready to sync.");
+  const { theme } = useTheme();
+  const [message, setMessage] = useState("Ready to sync pending records to the cloud.");
+  const [pending, setPending] = useState(0);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const counts = await dashboardCounts();
+    setPending(counts?.pending ?? 0);
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
   const run = async () => {
+    setBusy(true);
     setMessage("Syncing…");
     const result = await syncPending();
-    setMessage(result.error ?? `${result.synced} record(s) synced.`);
+    setMessage(result.error ?? `${result.synced} record(s) synced successfully.`);
+    await refresh();
+    setBusy(false);
     if (result.error) reasonAlert("Sync failed", result.error);
   };
+
   return (
     <Screen>
       <GlassCard>
-        <Text style={styles.hero}>Sync center</Text>
-        <Text style={styles.meta}>{message}</Text>
-        <Button title="Sync Now" onPress={run} />
+        <Hero>Sync center</Hero>
+        <View style={[styles.syncStat, { backgroundColor: theme.successSoft, borderColor: theme.border }]}>
+          <Text style={[styles.number, { color: theme.accentSecondary, fontSize: 28 }]}>{pending}</Text>
+          <Text style={{ color: theme.ink, fontWeight: "700" }}>Pending records</Text>
+        </View>
+        <Meta>{message}</Meta>
+        <Button title={busy ? "Syncing…" : "Sync now"} onPress={run} loading={busy} disabled={busy} disabledReason="Sync is already running." />
       </GlassCard>
     </Screen>
   );
 }
 
 export function SettingsScreen({ navigation }: TabProps<"Settings">) {
-  const { isDark, toggleTheme } = useTheme();
+  const { theme, isDark, toggleTheme } = useTheme();
   return (
     <Screen>
       <GlassCard>
-        <Text style={styles.hero}>Settings</Text>
+        <Hero>Settings</Hero>
         <View style={styles.setting}>
-          <Text>Dark mode</Text>
-          <Switch value={isDark} onValueChange={toggleTheme} />
+          <View>
+            <Text style={{ color: theme.ink, fontWeight: "700" }}>Dark mode</Text>
+            <Meta>Easier on the eyes in the field at night.</Meta>
+          </View>
+          <Switch value={isDark} onValueChange={toggleTheme} trackColor={{ true: theme.accentSecondary }} />
         </View>
-        <Text style={styles.meta}>Connected to GDRPL Survey cloud API.</Text>
-        <Button title="About GDRPL" onPress={() => navigation.getParent()?.navigate("CompanyIntro")} />
+        <Meta>Connected to GDRPL Survey cloud API on Render.</Meta>
+        <Button title="About GDRPL" variant="secondary" onPress={() => navigation.getParent()?.navigate("CompanyIntro")} />
         <Button
           title="Log out"
+          variant="danger"
           onPress={async () => {
             await logout();
-            navigation.getParent()?.navigate("Login");
+            navigation.getParent()?.dispatch(
+              CommonActions.reset({
+                index: 0,
+                routes: [{ name: "Login" }],
+              }),
+            );
           }}
         />
       </GlassCard>
@@ -709,28 +859,38 @@ export function SettingsScreen({ navigation }: TabProps<"Settings">) {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  content: { padding: 20, gap: 14, paddingBottom: 40 },
-  hero: { fontSize: 22, fontWeight: "800", color: "#1B3A5C", marginBottom: 12 },
-  sectionTitle: { fontSize: 16, fontWeight: "800", color: "#1B3A5C", marginBottom: 8 },
-  body: { color: "#3D5570", lineHeight: 22, marginBottom: 14, fontSize: 14 },
-  choice: { marginBottom: 12, minHeight: 92, justifyContent: "center" },
-  choiceText: { color: "#1B3A5C", fontWeight: "800", fontSize: 17 },
-  category: { paddingVertical: 18, marginBottom: 8 },
-  meta: { color: "#55708C", lineHeight: 21, marginBottom: 12 },
-  error: { color: "#9a4646", lineHeight: 21, marginBottom: 12, fontWeight: "600" },
+  choice: { marginBottom: 4, minHeight: 108, justifyContent: "center" },
+  choiceBadge: { alignSelf: "flex-start", borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, marginBottom: 8 },
+  choiceText: { fontWeight: "800", fontSize: 17, textTransform: "capitalize" },
+  category: { paddingVertical: 18, marginBottom: 2 },
+  categoryRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  error: { lineHeight: 21, marginBottom: 12, fontWeight: "600" },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  metric: { width: "47%", minHeight: 125, justifyContent: "center" },
-  number: { fontSize: 34, fontWeight: "800", color: "#1B4F8C" },
-  formRow: { flexDirection: "row", gap: 10 },
-  rail: { width: 6, backgroundColor: "rgba(111,168,62,.18)", borderRadius: 4, overflow: "hidden" },
-  railFill: { width: "100%", backgroundColor: "#6FA83E" },
-  form: { flex: 1 },
+  metric: { width: "47%", minHeight: 118, justifyContent: "center" },
+  number: { fontSize: 34, fontWeight: "800", marginBottom: 4 },
   options: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 14 },
-  pill: { borderWidth: 1, borderColor: "#B8CCE1", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 8 },
-  selected: { backgroundColor: "#CFE5BA", borderColor: "#6FA83E" },
-  camera: { marginTop: "auto", padding: 24, gap: 12 },
-  item: { marginBottom: 10 },
-  setting: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  qBlock: { marginBottom: 4 },
+  camera: { marginTop: "auto", padding: 24, gap: 10 },
+  item: { marginBottom: 2 },
+  setting: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 12 },
+  qBlock: { marginBottom: 6 },
+  progressTrack: { height: 8, borderRadius: 999, overflow: "hidden" },
+  progressFill: { height: "100%", borderRadius: 999 },
+  loadingBox: { alignItems: "center", paddingVertical: 18, gap: 8 },
+  photoRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 10 },
+  thumbWrap: { width: 72, height: 72, borderRadius: 12, overflow: "hidden" },
+  thumb: { width: "100%", height: "100%" },
+  thumbRemove: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  thumbRemoveText: { color: "#fff", fontWeight: "800", fontSize: 14, marginTop: -1 },
+  infoBox: { borderWidth: 1, borderRadius: 14, padding: 12, marginBottom: 8 },
+  syncStat: { borderWidth: 1, borderRadius: 16, padding: 16, marginBottom: 12, alignItems: "flex-start" },
 });
