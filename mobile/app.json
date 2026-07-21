@@ -20,6 +20,13 @@
           "locationWhenInUsePermission": "Allow GDRPL Survey to capture survey coordinates."
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow GDRPL Survey to attach structure photos from your gallery.",
+          "cameraPermission": "Allow GDRPL Survey to open camera apps for structure photos."
+        }
+      ],
       "expo-secure-store",
       "expo-asset",
       "expo-sqlite",
