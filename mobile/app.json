@@ -46,13 +46,16 @@
       ]
     },
     "ios": {
-      "bundleIdentifier": "com.gdrpl.survey"
+      "bundleIdentifier": "com.gdrpl.survey",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "extra": {
       "eas": {
-        "projectId": "fdb01712-e63d-42bb-ae83-8a0a070d9305"
+        "projectId": "3295ddfa-e873-4a03-829a-2df3a1f969f5"
       }
     },
-    "owner": "afzal635520"
+    "owner": "afzal932720"
   }
 }
