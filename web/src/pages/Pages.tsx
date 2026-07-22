@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
-import { Plus, Search, X } from "lucide-react";
+import { Plus, Search, Trash2, X } from "lucide-react";
 import { client, fetchDashboard, fetchRecords, type DashboardSummary, type Project, type RecordItem, type ReportTemplate, type User } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { PreviewModal } from "../components/PreviewModal";
@@ -424,41 +424,134 @@ export function ExcelExport() {
   return <Navigate to="/app/records" replace />;
 }
 
-type UiQuestionType = "short_question" | "multiple_selection" | "drop_down" | "multiple_drop_down";
+type UiQuestionType =
+  | "short_question"
+  | "multiple_selection"
+  | "dropdown_1_row"
+  | "dropdown_2_row"
+  | "dropdown_3_row"
+  | "dropdown_4_row";
+
+type MatrixRow = string[];
 
 type EditableQuestion = {
   id: string;
   label: string;
   uiType: UiQuestionType;
   required: boolean;
+  /** Single-row / multi-select answer labels. */
   options: string[];
+  /** Column headers for 2/3/4-row dropdown layouts. */
+  columns: string[];
+  /** Value rows for matrix-style dropdowns (2–4 cells each). */
+  matrixRows: MatrixRow[];
 };
 
 const UI_TYPE_OPTIONS: { value: UiQuestionType; label: string }[] = [
   { value: "short_question", label: "Short Question" },
   { value: "multiple_selection", label: "Multiple Selection" },
-  { value: "drop_down", label: "Drop Down" },
-  { value: "multiple_drop_down", label: "Multiple Drop Down" },
+  { value: "dropdown_1_row", label: "Drop Down with Single Row" },
+  { value: "dropdown_2_row", label: "Drop Down With 02 Row" },
+  { value: "dropdown_3_row", label: "Drop Down With 03 Row" },
+  { value: "dropdown_4_row", label: "Drop Down With 04 Row" },
 ];
+
+function defaultColumns(uiType: UiQuestionType): string[] {
+  if (uiType === "dropdown_2_row") return ["Number of Pipe", "Number of Dia"];
+  if (uiType === "dropdown_3_row") return ["Number of Pipe", "X", "Number of Dia"];
+  if (uiType === "dropdown_4_row") return ["Column 1", "Column 2", "Column 3", "Column 4"];
+  return [];
+}
+
+function colCount(uiType: UiQuestionType): number {
+  if (uiType === "dropdown_2_row") return 2;
+  if (uiType === "dropdown_3_row") return 3;
+  if (uiType === "dropdown_4_row") return 4;
+  return 0;
+}
+
+function needsOptions(uiType: UiQuestionType) {
+  return uiType !== "short_question";
+}
+
+function isMatrixType(uiType: UiQuestionType) {
+  return uiType === "dropdown_2_row" || uiType === "dropdown_3_row" || uiType === "dropdown_4_row";
+}
 
 function toUiType(q: Record<string, unknown>): UiQuestionType {
   const type = String(q.type || "text");
   const ui = String(q.ui || "");
-  if (type === "multiselect" && ui === "dropdown") return "multiple_drop_down";
+  if (ui === "dropdown_2" || ui === "matrix_2") return "dropdown_2_row";
+  if (ui === "dropdown_3" || ui === "matrix_3") return "dropdown_3_row";
+  if (ui === "dropdown_4" || ui === "matrix_4") return "dropdown_4_row";
   if (type === "multiselect") return "multiple_selection";
-  if (type === "select" || type === "condition_rating") return "drop_down";
+  if (type === "select" || type === "condition_rating") return "dropdown_1_row";
   return "short_question";
 }
 
 function fromUiType(uiType: UiQuestionType): { type: string; ui?: string } {
   if (uiType === "multiple_selection") return { type: "multiselect", ui: "checkbox" };
-  if (uiType === "multiple_drop_down") return { type: "multiselect", ui: "dropdown" };
-  if (uiType === "drop_down") return { type: "select", ui: "dropdown" };
+  if (uiType === "dropdown_1_row") return { type: "select", ui: "dropdown" };
+  if (uiType === "dropdown_2_row") return { type: "select", ui: "dropdown_2" };
+  if (uiType === "dropdown_3_row") return { type: "select", ui: "dropdown_3" };
+  if (uiType === "dropdown_4_row") return { type: "select", ui: "dropdown_4" };
   return { type: "text" };
 }
 
-function needsOptions(uiType: UiQuestionType) {
-  return uiType !== "short_question";
+function matrixToOptions(uiType: UiQuestionType, rows: MatrixRow[]): string[] {
+  return rows
+    .map((row) => {
+      const cells = row.map((c) => c.trim()).filter((c, i) => (uiType === "dropdown_3_row" ? i !== 1 : true) && c);
+      if (uiType === "dropdown_3_row") {
+        const left = row[0]?.trim() || "";
+        const right = row[2]?.trim() || "";
+        return left && right ? `${left} x ${right}` : "";
+      }
+      if (uiType === "dropdown_2_row") {
+        const left = row[0]?.trim() || "";
+        const right = row[1]?.trim() || "";
+        return left && right ? `${left} x ${right}` : left || right;
+      }
+      return cells.join(" | ");
+    })
+    .filter(Boolean);
+}
+
+function parseQuestion(q: Record<string, unknown>): EditableQuestion {
+  const uiType = toUiType(q);
+  const options = Array.isArray(q.options)
+    ? q.options.map((o) => (typeof o === "string" ? o : String((o as { label?: string; value?: string }).label || (o as { value?: string }).value || "")))
+    : [];
+  const columns = Array.isArray(q.columns) ? q.columns.map(String) : defaultColumns(uiType);
+  let matrixRows: MatrixRow[] = Array.isArray(q.matrix_rows)
+    ? (q.matrix_rows as unknown[]).map((r) => (Array.isArray(r) ? r.map(String) : [String(r)]))
+    : [];
+
+  if (isMatrixType(uiType) && !matrixRows.length && options.length) {
+    matrixRows = options.map((opt) => {
+      if (uiType === "dropdown_2_row" || uiType === "dropdown_3_row") {
+        const parts = opt.split(/\s*[x×]\s*/i);
+        if (uiType === "dropdown_3_row") return [parts[0] || "", "X", parts[1] || ""];
+        return [parts[0] || "", parts[1] || ""];
+      }
+      return opt.split(/\s*\|\s*/);
+    });
+  }
+
+  const n = colCount(uiType);
+  if (isMatrixType(uiType) && !matrixRows.length) {
+    matrixRows = [Array.from({ length: n }, (_, i) => (uiType === "dropdown_3_row" && i === 1 ? "X" : ""))];
+  }
+
+  return {
+    id: String(q.id || `q_${Date.now()}`),
+    label: String(q.label || ""),
+    uiType,
+    required: q.required !== false,
+    options: options.length ? options : needsOptions(uiType) && !isMatrixType(uiType) ? [""] : [],
+    columns: columns.length ? columns : defaultColumns(uiType),
+    matrixRows,
+  };
 }
 
 export function SchemaEditor() {
@@ -466,6 +559,7 @@ export function SchemaEditor() {
   const [rawSchema, setRawSchema] = useState<Record<string, unknown>>({});
   const [categoryKey, setCategoryKey] = useState("");
   const [questions, setQuestions] = useState<EditableQuestion[]>([]);
+  const [history, setHistory] = useState<EditableQuestion[][]>([]);
   const [message, setMessage] = useState("");
   const [draftOption, setDraftOption] = useState<Record<string, string>>({});
 
@@ -474,23 +568,35 @@ export function SchemaEditor() {
     return Object.keys(cats);
   }, [rawSchema]);
 
+  const pushHistory = (current: EditableQuestion[]) => {
+    setHistory((h) => [...h.slice(-39), current.map((q) => ({ ...q, options: [...q.options], columns: [...q.columns], matrixRows: q.matrixRows.map((r) => [...r]) }))]);
+  };
+
+  const applyQuestions = (updater: (prev: EditableQuestion[]) => EditableQuestion[]) => {
+    setQuestions((prev) => {
+      pushHistory(prev);
+      return updater(prev);
+    });
+  };
+
+  const undo = () => {
+    setHistory((h) => {
+      if (!h.length) {
+        setMessage("Nothing to undo.");
+        return h;
+      }
+      const prev = h[h.length - 1];
+      setQuestions(prev);
+      setMessage("Undid last change (one step back).");
+      return h.slice(0, -1);
+    });
+  };
+
   const loadCategory = (schema: Record<string, unknown>, key: string) => {
     const cats = (schema.categories || {}) as Record<string, { questions?: Record<string, unknown>[] }>;
-    const list = (cats[key]?.questions || []).map((q) => ({
-      id: String(q.id || crypto.randomUUID()),
-      label: String(q.label || ""),
-      uiType: toUiType(q),
-      required: q.required !== false,
-      options: Array.isArray(q.options)
-        ? q.options.map((o) => (typeof o === "string" ? o : String((o as { label?: string; value?: string }).label || (o as { value?: string }).value || "")))
-        : [""],
-    }));
-    setQuestions(
-      list.map((q) => ({
-        ...q,
-        options: q.options.length ? q.options : [""],
-      })),
-    );
+    const list = (cats[key]?.questions || []).map(parseQuestion);
+    setQuestions(list);
+    setHistory([]);
   };
 
   const load = () => {
@@ -506,7 +612,7 @@ export function SchemaEditor() {
         }
         setRawSchema(x.schema_json || {});
         const cats = Object.keys((x.schema_json?.categories || {}) as object);
-        const key = cats[0] || "";
+        const key = categoryKey && cats.includes(categoryKey) ? categoryKey : cats[0] || "";
         setCategoryKey(key);
         if (key) loadCategory(x.schema_json, key);
         setMessage(`Loaded schema v${x.version}`);
@@ -520,26 +626,55 @@ export function SchemaEditor() {
     if (categoryKey && rawSchema.categories) loadCategory(rawSchema, categoryKey);
   }, [categoryKey]);
 
-  const updateQuestion = (id: string, patch: Partial<EditableQuestion>) => {
+  const updateQuestion = (id: string, patch: Partial<EditableQuestion>, trackUndo = false) => {
+    if (trackUndo) {
+      applyQuestions((list) => list.map((q) => (q.id === id ? { ...q, ...patch } : q)));
+      return;
+    }
     setQuestions((list) => list.map((q) => (q.id === id ? { ...q, ...patch } : q)));
   };
 
+  const removeAnswer = (qid: string, index: number) => {
+    applyQuestions((list) =>
+      list.map((q) => {
+        if (q.id !== qid) return q;
+        if (isMatrixType(q.uiType)) {
+          const matrixRows = q.matrixRows.filter((_, i) => i !== index);
+          return { ...q, matrixRows: matrixRows.length ? matrixRows : [Array.from({ length: colCount(q.uiType) }, (_, i) => (q.uiType === "dropdown_3_row" && i === 1 ? "X" : ""))] };
+        }
+        const options = q.options.filter((_, i) => i !== index);
+        return { ...q, options: options.length ? options : [""] };
+      }),
+    );
+  };
+
   const addAnswerPanel = (id: string) => {
-    setQuestions((list) =>
-      list.map((q) => (q.id === id ? { ...q, options: [...q.options, draftOption[id]?.trim() || ""] } : q)),
+    applyQuestions((list) =>
+      list.map((q) => {
+        if (q.id !== id) return q;
+        if (isMatrixType(q.uiType)) {
+          const n = colCount(q.uiType);
+          const row = Array.from({ length: n }, (_, i) => (q.uiType === "dropdown_3_row" && i === 1 ? "X" : ""));
+          return { ...q, matrixRows: [...q.matrixRows, row] };
+        }
+        const next = draftOption[id]?.trim() || "";
+        return { ...q, options: [...q.options, next] };
+      }),
     );
     setDraftOption((d) => ({ ...d, [id]: "" }));
   };
 
   const addQuestion = () => {
-    setQuestions((list) => [
+    applyQuestions((list) => [
       ...list,
       {
         id: `q_${Date.now()}`,
         label: "",
         uiType: "short_question",
         required: true,
-        options: [""],
+        options: [],
+        columns: [],
+        matrixRows: [],
       },
     ]);
   };
@@ -558,8 +693,13 @@ export function SchemaEditor() {
             required: q.required,
           };
           if (mapped.ui) item.ui = mapped.ui;
-          if (needsOptions(q.uiType)) {
+          if (q.uiType === "multiple_selection" || q.uiType === "dropdown_1_row") {
             item.options = q.options.map((o) => o.trim()).filter(Boolean);
+          }
+          if (isMatrixType(q.uiType)) {
+            item.columns = q.columns;
+            item.matrix_rows = q.matrixRows;
+            item.options = matrixToOptions(q.uiType, q.matrixRows);
           }
           return item;
         }),
@@ -568,10 +708,90 @@ export function SchemaEditor() {
       await client.post("/schemas", { module, schema_json, is_active: true });
       setRawSchema(schema_json);
       setMessage("New schema version published. Surveyors will see the updated form.");
+      setHistory([]);
       load();
     } catch (e) {
       setMessage((e as Error).message);
     }
+  };
+
+  const renderAnswerEditor = (q: EditableQuestion) => {
+    if (q.uiType === "short_question") return null;
+
+    if (q.uiType === "multiple_selection" || q.uiType === "dropdown_1_row") {
+      return (
+        <div className="schema-answers">
+          {q.options.map((opt, i) => (
+            <div key={`${q.id}-opt-${i}`} className="schema-answer-row">
+              <input
+                className="field schema-answer"
+                value={opt}
+                placeholder={i === 0 ? "Answer (fixed panel)" : "Answer option"}
+                onChange={(e) => {
+                  const next = [...q.options];
+                  next[i] = e.target.value;
+                  updateQuestion(q.id, { options: next });
+                }}
+              />
+              <button type="button" className="schema-trash" title="Remove answer panel" onClick={() => removeAnswer(q.id, i)}>
+                <Trash2 size={16} />
+              </button>
+            </div>
+          ))}
+          <div className="schema-answer-row">
+            <input
+              className="field schema-answer draft"
+              value={draftOption[q.id] || ""}
+              placeholder="Type here"
+              onChange={(e) => setDraftOption((d) => ({ ...d, [q.id]: e.target.value }))}
+            />
+          </div>
+        </div>
+      );
+    }
+
+    // 02 / 03 / 04 row matrix layouts
+    return (
+      <div className="schema-matrix">
+        <div className={`schema-matrix-headers cols-${colCount(q.uiType)}`}>
+          {q.columns.map((col, i) => (
+            <input
+              key={`${q.id}-col-${i}`}
+              className="field schema-answer"
+              value={col}
+              disabled={q.uiType === "dropdown_3_row" && i === 1}
+              onChange={(e) => {
+                const columns = [...q.columns];
+                columns[i] = e.target.value;
+                updateQuestion(q.id, { columns });
+              }}
+            />
+          ))}
+        </div>
+        {q.matrixRows.map((row, ri) => (
+          <div key={`${q.id}-row-${ri}`} className={`schema-matrix-row cols-${colCount(q.uiType)}`}>
+            {row.map((cell, ci) => (
+              <input
+                key={`${q.id}-cell-${ri}-${ci}`}
+                className="field schema-answer"
+                value={cell}
+                disabled={q.uiType === "dropdown_3_row" && ci === 1}
+                placeholder="Type here"
+                onChange={(e) => {
+                  const matrixRows = q.matrixRows.map((r) => [...r]);
+                  matrixRows[ri][ci] = e.target.value;
+                  if (q.uiType === "dropdown_3_row") matrixRows[ri][1] = "X";
+                  updateQuestion(q.id, { matrixRows });
+                }}
+              />
+            ))}
+            <button type="button" className="schema-trash" title="Remove answer panel" onClick={() => removeAnswer(q.id, ri)}>
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -586,7 +806,7 @@ export function SchemaEditor() {
         }
       />
       <GlassPanel>
-        <p className="muted">Only super admin can add/remove/reorder questions. Admin cannot change form architecture.</p>
+        <p className="muted">Make the form here and publish a new version — no coding required. Only super admin can change form architecture.</p>
         <div className="toolbar">
           <select className="field" value={module} onChange={(e) => setModule(e.target.value)}>
             <option value="structure_inventory">Structure Inventory</option>
@@ -599,6 +819,9 @@ export function SchemaEditor() {
               </option>
             ))}
           </select>
+          <button className="button secondary" type="button" onClick={undo} title="Undo last change (like Ctrl+Z)">
+            Back
+          </button>
         </div>
 
         <div className="schema-builder">
@@ -606,61 +829,54 @@ export function SchemaEditor() {
             <div key={q.id} className="schema-question">
               <div className="schema-question-row">
                 <div className="schema-question-main">
-                  <label className="schema-label">Question {index + 1}</label>
+                  <label className="schema-label">Question:- {index + 1}</label>
                   <input
                     className="field schema-question-input"
                     value={q.label}
                     placeholder="Question text"
                     onChange={(e) => updateQuestion(q.id, { label: e.target.value })}
                   />
-                  {needsOptions(q.uiType) ? (
-                    <div className="schema-answers">
-                      {q.options.map((opt, i) => (
-                        <input
-                          key={`${q.id}-opt-${i}`}
-                          className="field schema-answer"
-                          value={opt}
-                          placeholder={i === 0 ? "Answer (fixed panel)" : "Answer option"}
-                          onChange={(e) => {
-                            const next = [...q.options];
-                            next[i] = e.target.value;
-                            updateQuestion(q.id, { options: next });
-                          }}
-                        />
-                      ))}
-                      <input
-                        className="field schema-answer draft"
-                        value={draftOption[q.id] || ""}
-                        placeholder="Type here"
-                        onChange={(e) => setDraftOption((d) => ({ ...d, [q.id]: e.target.value }))}
-                      />
-                    </div>
-                  ) : null}
+                  {renderAnswerEditor(q)}
                 </div>
                 <div className="schema-type-col">
                   <label className="schema-label">
                     Question Type <span className="schema-icon filter" title="Filter" />
                   </label>
-                  <div className="schema-type-wrap">
-                    <select
-                      className="field schema-type"
-                      value={q.uiType}
-                      onChange={(e) => {
-                        const uiType = e.target.value as UiQuestionType;
-                        updateQuestion(q.id, {
+                  <select
+                    className="field schema-type"
+                    value={q.uiType}
+                    onChange={(e) => {
+                      const uiType = e.target.value as UiQuestionType;
+                      const n = colCount(uiType);
+                      updateQuestion(
+                        q.id,
+                        {
                           uiType,
-                          options: needsOptions(uiType) ? q.options.length ? q.options : [""] : [],
-                        });
-                      }}
-                    >
-                      {UI_TYPE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="schema-icon dropdown" title="Drop down" />
-                  </div>
+                          columns: defaultColumns(uiType),
+                          options:
+                            uiType === "short_question"
+                              ? []
+                              : uiType === "multiple_selection" || uiType === "dropdown_1_row"
+                                ? q.options.length
+                                  ? q.options
+                                  : [""]
+                                : [],
+                          matrixRows: isMatrixType(uiType)
+                            ? q.matrixRows.length && colCount(q.uiType) === n
+                              ? q.matrixRows
+                              : [Array.from({ length: n }, (_, i) => (uiType === "dropdown_3_row" && i === 1 ? "X" : ""))]
+                            : [],
+                        },
+                        true,
+                      );
+                    }}
+                  >
+                    {UI_TYPE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                   {needsOptions(q.uiType) ? (
                     <button className="button secondary schema-add-answer" type="button" onClick={() => addAnswerPanel(q.id)}>
                       Add Answer Panel
