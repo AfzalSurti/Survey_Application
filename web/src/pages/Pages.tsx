@@ -102,11 +102,13 @@ export function Records() {
   const canCorrect = user?.role === "admin" || user?.role === "super_admin";
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [query, setQuery] = useState("");
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<RecordItem | null>(null);
+  const [projectStructures, setProjectStructures] = useState<RecordItem[]>([]);
+  const [activeStructureId, setActiveStructureId] = useState<string | null>(null);
   const [editJson, setEditJson] = useState("");
   const [editChainage, setEditChainage] = useState("");
   const [preview, setPreview] = useState<"excel" | "word" | null>(null);
+  const [previewRecords, setPreviewRecords] = useState<RecordItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [filters, setFilters] = useState({
     project_name: "",
@@ -121,12 +123,15 @@ export function Records() {
   useEffect(() => {
     fetchRecords().then(setRecords).catch(() => setRecords([]));
   }, []);
+
+  const activeStructure = projectStructures.find((r) => r.id === activeStructureId) || selected;
+
   useEffect(() => {
-    if (selected) {
-      setEditJson(JSON.stringify(selected.responses_json || {}, null, 2));
-      setEditChainage(selected.chainage);
+    if (activeStructure) {
+      setEditJson(JSON.stringify(activeStructure.responses_json || {}, null, 2));
+      setEditChainage(activeStructure.chainage);
     }
-  }, [selected]);
+  }, [activeStructure]);
 
   const filtered = useMemo(() => {
     return records.filter((r) => {
@@ -143,30 +148,50 @@ export function Records() {
     });
   }, [records, query, filters]);
 
-  const selectedRecords = filtered.filter((r) => selectedIds.includes(r.id));
-  const toggleRow = (r: RecordItem) => {
+  /** One display row per project (entire project data), using the newest structure as the summary row. */
+  const projectRows = useMemo(() => {
+    const byProject = new Map<string, RecordItem>();
+    for (const r of filtered) {
+      const key = r.project_id || r.id;
+      const prev = byProject.get(key);
+      if (!prev) {
+        byProject.set(key, r);
+        continue;
+      }
+      const prevTime = Date.parse(prev.complete_date || prev.updated_at || prev.created_at || "") || 0;
+      const nextTime = Date.parse(r.complete_date || r.updated_at || r.created_at || "") || 0;
+      if (nextTime >= prevTime) byProject.set(key, r);
+    }
+    return Array.from(byProject.values());
+  }, [filtered]);
+
+  const structuresForProject = (projectId: string) =>
+    records.filter((r) => r.project_id === projectId);
+
+  const openDetails = (r: RecordItem) => {
+    const siblings = structuresForProject(r.project_id);
     setSelected(r);
-    setSelectedIds((ids) => (ids.includes(r.id) ? ids.filter((id) => id !== r.id) : [...ids, r.id]));
+    setProjectStructures(siblings.length ? siblings : [r]);
+    setActiveStructureId(r.id);
   };
 
-  const setStatusAction = async (next: "approved" | "rejected") => {
-    if (!selected) return;
-    try {
-      const updated = await client.patch<RecordItem>(`/records/${selected.id}/status`, { status: next });
-      setRecords((x) => x.map((r) => (r.id === updated.id ? updated : r)));
-      setSelected(updated);
-    } catch (e) {
-      alert((e as Error).message);
-    }
+  const openPreview = (mode: "excel" | "word", r: RecordItem) => {
+    const siblings = structuresForProject(r.project_id);
+    setPreviewRecords(siblings.length ? siblings : [r]);
+    setPreview(mode);
   };
 
   const saveCorrections = async () => {
-    if (!selected || !canCorrect) return;
+    if (!activeStructure || !canCorrect) return;
     try {
       const responses_json = JSON.parse(editJson);
-      const updated = await client.patch<RecordItem>(`/records/${selected.id}`, { chainage: editChainage, responses_json });
+      const updated = await client.patch<RecordItem>(`/records/${activeStructure.id}`, {
+        chainage: editChainage,
+        responses_json,
+      });
       setRecords((x) => x.map((r) => (r.id === updated.id ? updated : r)));
-      setSelected(updated);
+      setProjectStructures((x) => x.map((r) => (r.id === updated.id ? updated : r)));
+      setSelected((s) => (s?.id === updated.id ? updated : s));
       alert("Record data corrected.");
     } catch (e) {
       alert((e as Error).message || "Could not save corrections.");
@@ -174,18 +199,26 @@ export function Records() {
   };
 
   const downloadWord = async () => {
-    const ids = selectedRecords.map((r) => r.id);
-    if (!ids.length) return alert("Select at least one record.");
+    const ids = previewRecords.map((r) => r.id);
+    if (!ids.length) return alert("No records to download.");
     setBusy(true);
-    try { await client.download("/reports/generate", { record_ids: ids }, "POST"); }
-    catch (e) { alert((e as Error).message); }
-    finally { setBusy(false); }
+    try {
+      await client.download("/reports/generate", { record_ids: ids }, "POST");
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
   const downloadExcel = async () => {
     setBusy(true);
-    try { await client.download("/exports/excel"); }
-    catch (e) { alert((e as Error).message); }
-    finally { setBusy(false); }
+    try {
+      await client.download("/exports/excel");
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const filterFields: { key: keyof typeof filters; label: string }[] = [
@@ -200,78 +233,183 @@ export function Records() {
 
   return (
     <>
-      <Heading eyebrow="Review workspace" title="Survey records" action={<span className="muted">{selectedIds.length} selected · {filtered.length} visible</span>} />
-      <div className="records-layout">
-        <GlassPanel>
-          <div className="toolbar">
-            <div style={{ position: "relative", flex: 1 }}>
-              <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "#627b95" }} />
-              <input className="field" style={{ paddingLeft: 32, width: "100%" }} placeholder="Search records" value={query} onChange={(e) => setQuery(e.target.value)} />
-            </div>
+      <Heading
+        eyebrow="Review workspace"
+        title="Survey records"
+        action={<span className="muted">{projectRows.length} project(s) · {filtered.length} structure(s)</span>}
+      />
+      <GlassPanel>
+        <div className="toolbar">
+          <div style={{ position: "relative", flex: 1 }}>
+            <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "#627b95" }} />
+            <input
+              className="field"
+              style={{ paddingLeft: 32, width: "100%" }}
+              placeholder="Search records"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
           </div>
-          <div className="filter-row">
-            {filterFields.map((f) => (
-              <input key={f.key} className="field" placeholder={f.label} value={filters[f.key]} onChange={(e) => setFilters((s) => ({ ...s, [f.key]: e.target.value }))} />
-            ))}
+        </div>
+        <div className="filter-row">
+          {filterFields.map((f) => (
+            <input
+              key={f.key}
+              className="field"
+              placeholder={f.label}
+              value={filters[f.key]}
+              onChange={(e) => setFilters((s) => ({ ...s, [f.key]: e.target.value }))}
+            />
+          ))}
+        </div>
+        <div className="table-wrap">
+          <table className="table">
+            <thead>
+              <tr>
+                {SURVEY_COLUMNS_COMPLETE.map((h) => (
+                  <th key={h}>{h}</th>
+                ))}
+                <th>Status</th>
+                <th>Excel Generation</th>
+                <th>Report Generation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {projectRows.map((r) => (
+                <tr key={r.project_id || r.id}>
+                  <td>{r.project_name || "—"}</td>
+                  <td className="mono">{r.project_number || "—"}</td>
+                  <td>{r.survey_type || "—"}</td>
+                  <td>{r.key_engineer_name || "—"}</td>
+                  <td>{r.head_surveyor_name || "—"}</td>
+                  <td>{fmt(r.assign_date)}</td>
+                  <td>{fmt(r.complete_date)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="link-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDetails(r);
+                      }}
+                      title="Open record details"
+                    >
+                      <StatusBadge status={r.status} />
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="link-btn preview-link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openPreview("excel", r);
+                      }}
+                    >
+                      Preview
+                    </button>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="link-btn preview-link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openPreview("word", r);
+                      }}
+                    >
+                      Preview
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!projectRows.length && <div className="empty">No survey records match these filters.</div>}
+        </div>
+      </GlassPanel>
+
+      <PreviewModal
+        open={preview !== null}
+        mode={preview}
+        records={previewRecords}
+        busy={busy}
+        onClose={() => setPreview(null)}
+        onDownloadWord={downloadWord}
+        onDownloadExcel={downloadExcel}
+      />
+
+      {selected && (
+        <aside className="glass drawer">
+          <button className="drawer-close" onClick={() => setSelected(null)}>
+            <X />
+          </button>
+          <p className="eyebrow">Record details</p>
+          <h2>{selected.project_name || selected.chainage}</h2>
+          <div className="kv">
+            <span>Project</span>
+            <strong>{selected.project_name || "—"}</strong>
           </div>
-          <div className="table-wrap">
+          <div className="kv">
+            <span>Survey type</span>
+            <strong>{selected.survey_type || "—"}</strong>
+          </div>
+          <div className="kv">
+            <span>Structures</span>
+            <strong>{projectStructures.length} surveyed</strong>
+          </div>
+
+          <h3 style={{ marginTop: 18 }}>All surveyed structures</h3>
+          <div className="table-wrap" style={{ marginBottom: 14 }}>
             <table className="table">
               <thead>
                 <tr>
-                  <th></th>
-                  {SURVEY_COLUMNS_COMPLETE.map((h) => (<th key={h}>{h}</th>))}
+                  <th>Chainage</th>
+                  <th>Structure</th>
                   <th>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.id} onClick={() => toggleRow(r)}>
-                    <td><input type="checkbox" checked={selectedIds.includes(r.id)} readOnly /></td>
-                    <td>{r.project_name || "—"}</td>
-                    <td className="mono">{r.project_number || "—"}</td>
-                    <td>{r.survey_type || "—"}</td>
-                    <td>{r.key_engineer_name || "—"}</td>
-                    <td>{r.head_surveyor_name || "—"}</td>
-                    <td>{fmt(r.assign_date)}</td>
-                    <td>{fmt(r.complete_date)}</td>
-                    <td><StatusBadge status={r.status} /></td>
+                {projectStructures.map((s) => (
+                  <tr
+                    key={s.id}
+                    onClick={() => setActiveStructureId(s.id)}
+                    style={{
+                      cursor: "pointer",
+                      background: s.id === activeStructureId ? "rgba(27,79,140,0.08)" : undefined,
+                    }}
+                  >
+                    <td className="mono">{s.chainage || "—"}</td>
+                    <td>{(s.structure_category || "—").replace(/_/g, " ")}</td>
+                    <td>
+                      <StatusBadge status={s.status} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            {!filtered.length && <div className="empty">No survey records match these filters.</div>}
           </div>
-        </GlassPanel>
-        <div className="records-actions">
-          <ActionButton className="button" disabled={!selectedIds.length} disabledReason="Select one or more rows first." onClick={() => setPreview("excel")}>CSV/Excel Generation</ActionButton>
-          <ActionButton className="button secondary" disabled={!selectedIds.length} disabledReason="Select rows, then preview Excel." onClick={() => setPreview("excel")}>Preview Excel</ActionButton>
-          <ActionButton className="button" disabled={!selectedIds.length} disabledReason="Select one or more rows first." onClick={() => setPreview("word")}>Report Generation</ActionButton>
-          <ActionButton className="button secondary" disabled={!selectedIds.length} disabledReason="Select rows, then preview the Word report." onClick={() => setPreview("word")}>Preview Word Report</ActionButton>
-        </div>
-      </div>
-      <PreviewModal open={preview !== null} title={preview === "excel" ? "Excel preview" : "Word report preview"} records={selectedRecords} busy={busy} onClose={() => setPreview(null)} onDownloadWord={downloadWord} onDownloadExcel={downloadExcel} />
-      {selected && (
-        <aside className="glass drawer">
-          <button className="drawer-close" onClick={() => setSelected(null)}><X /></button>
-          <p className="eyebrow">Record details</p>
-          <h2>{selected.chainage}</h2>
-          <div style={{ margin: "12px 0" }}><StatusBadge status={selected.status} /></div>
-          <div className="kv"><span>Project</span><strong>{selected.project_name || "—"}</strong></div>
-          <div className="kv"><span>Survey type</span><strong>{selected.survey_type || "—"}</strong></div>
-          {canCorrect ? (
+
+          {activeStructure && canCorrect ? (
             <>
-              <h3 style={{ marginTop: 20 }}>Correct data</h3>
-              <div className="form-row"><label>Chainage</label><input className="field mono" value={editChainage} onChange={(e) => setEditChainage(e.target.value)} /></div>
-              <div className="form-row"><label>Responses JSON</label><textarea className="field code" value={editJson} onChange={(e) => setEditJson(e.target.value)} spellCheck={false} /></div>
-              <button className="button" onClick={saveCorrections}>Save corrections</button>
-              <div className="toolbar" style={{ marginTop: 12 }}>
-                <button className="button" onClick={() => setStatusAction("approved")}>Approve</button>
-                <button className="button danger" onClick={() => setStatusAction("rejected")}>Reject</button>
+              <h3>Correct data — {activeStructure.chainage || "structure"}</h3>
+              <div className="form-row">
+                <label>Chainage</label>
+                <input className="field mono" value={editChainage} onChange={(e) => setEditChainage(e.target.value)} />
               </div>
+              <div className="form-row">
+                <label>Responses JSON</label>
+                <textarea className="field code" value={editJson} onChange={(e) => setEditJson(e.target.value)} spellCheck={false} />
+              </div>
+              <button className="button" onClick={saveCorrections}>
+                Save corrections
+              </button>
             </>
-          ) : (
-            <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>{JSON.stringify(selected.responses_json || {}, null, 2)}</pre>
-          )}
+          ) : activeStructure ? (
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", fontSize: ".75rem" }}>
+              {JSON.stringify(activeStructure.responses_json || {}, null, 2)}
+            </pre>
+          ) : null}
         </aside>
       )}
     </>
@@ -286,34 +424,167 @@ export function ExcelExport() {
   return <Navigate to="/app/records" replace />;
 }
 
+type UiQuestionType = "short_question" | "multiple_selection" | "drop_down" | "multiple_drop_down";
+
+type EditableQuestion = {
+  id: string;
+  label: string;
+  uiType: UiQuestionType;
+  required: boolean;
+  options: string[];
+};
+
+const UI_TYPE_OPTIONS: { value: UiQuestionType; label: string }[] = [
+  { value: "short_question", label: "Short Question" },
+  { value: "multiple_selection", label: "Multiple Selection" },
+  { value: "drop_down", label: "Drop Down" },
+  { value: "multiple_drop_down", label: "Multiple Drop Down" },
+];
+
+function toUiType(q: Record<string, unknown>): UiQuestionType {
+  const type = String(q.type || "text");
+  const ui = String(q.ui || "");
+  if (type === "multiselect" && ui === "dropdown") return "multiple_drop_down";
+  if (type === "multiselect") return "multiple_selection";
+  if (type === "select" || type === "condition_rating") return "drop_down";
+  return "short_question";
+}
+
+function fromUiType(uiType: UiQuestionType): { type: string; ui?: string } {
+  if (uiType === "multiple_selection") return { type: "multiselect", ui: "checkbox" };
+  if (uiType === "multiple_drop_down") return { type: "multiselect", ui: "dropdown" };
+  if (uiType === "drop_down") return { type: "select", ui: "dropdown" };
+  return { type: "text" };
+}
+
+function needsOptions(uiType: UiQuestionType) {
+  return uiType !== "short_question";
+}
+
 export function SchemaEditor() {
   const [module, setModule] = useState("structure_inventory");
-  const [json, setJson] = useState("{}");
+  const [rawSchema, setRawSchema] = useState<Record<string, unknown>>({});
+  const [categoryKey, setCategoryKey] = useState("");
+  const [questions, setQuestions] = useState<EditableQuestion[]>([]);
   const [message, setMessage] = useState("");
+  const [draftOption, setDraftOption] = useState<Record<string, string>>({});
+
+  const categoryKeys = useMemo(() => {
+    const cats = (rawSchema.categories || {}) as Record<string, unknown>;
+    return Object.keys(cats);
+  }, [rawSchema]);
+
+  const loadCategory = (schema: Record<string, unknown>, key: string) => {
+    const cats = (schema.categories || {}) as Record<string, { questions?: Record<string, unknown>[] }>;
+    const list = (cats[key]?.questions || []).map((q) => ({
+      id: String(q.id || crypto.randomUUID()),
+      label: String(q.label || ""),
+      uiType: toUiType(q),
+      required: q.required !== false,
+      options: Array.isArray(q.options)
+        ? q.options.map((o) => (typeof o === "string" ? o : String((o as { label?: string; value?: string }).label || (o as { value?: string }).value || "")))
+        : [""],
+    }));
+    setQuestions(
+      list.map((q) => ({
+        ...q,
+        options: q.options.length ? q.options : [""],
+      })),
+    );
+  };
+
   const load = () => {
     client
-      .get<{ module: string; schema_json: object; version: number }[]>(`/schemas?module=${module}`)
+      .get<{ module: string; schema_json: Record<string, unknown>; version: number }[]>(`/schemas?module=${module}`)
       .then((s) => {
         const x = s[0];
-        if (x) setJson(JSON.stringify(x.schema_json, null, 2));
-        else setMessage("No schema for this module yet.");
+        if (!x) {
+          setMessage("No schema for this module yet.");
+          setRawSchema({});
+          setQuestions([]);
+          return;
+        }
+        setRawSchema(x.schema_json || {});
+        const cats = Object.keys((x.schema_json?.categories || {}) as object);
+        const key = cats[0] || "";
+        setCategoryKey(key);
+        if (key) loadCategory(x.schema_json, key);
+        setMessage(`Loaded schema v${x.version}`);
       })
       .catch((e) => setMessage((e as Error).message));
   };
+
   useEffect(load, [module]);
+
+  useEffect(() => {
+    if (categoryKey && rawSchema.categories) loadCategory(rawSchema, categoryKey);
+  }, [categoryKey]);
+
+  const updateQuestion = (id: string, patch: Partial<EditableQuestion>) => {
+    setQuestions((list) => list.map((q) => (q.id === id ? { ...q, ...patch } : q)));
+  };
+
+  const addAnswerPanel = (id: string) => {
+    setQuestions((list) =>
+      list.map((q) => (q.id === id ? { ...q, options: [...q.options, draftOption[id]?.trim() || ""] } : q)),
+    );
+    setDraftOption((d) => ({ ...d, [id]: "" }));
+  };
+
+  const addQuestion = () => {
+    setQuestions((list) => [
+      ...list,
+      {
+        id: `q_${Date.now()}`,
+        label: "",
+        uiType: "short_question",
+        required: true,
+        options: [""],
+      },
+    ]);
+  };
+
   const save = async () => {
     try {
-      const schema_json = JSON.parse(json);
+      const cats = { ...((rawSchema.categories || {}) as Record<string, unknown>) };
+      cats[categoryKey] = {
+        ...((cats[categoryKey] as object) || {}),
+        questions: questions.map((q) => {
+          const mapped = fromUiType(q.uiType);
+          const item: Record<string, unknown> = {
+            id: q.id,
+            label: q.label.trim() || q.id,
+            type: mapped.type,
+            required: q.required,
+          };
+          if (mapped.ui) item.ui = mapped.ui;
+          if (needsOptions(q.uiType)) {
+            item.options = q.options.map((o) => o.trim()).filter(Boolean);
+          }
+          return item;
+        }),
+      };
+      const schema_json = { ...rawSchema, categories: cats };
       await client.post("/schemas", { module, schema_json, is_active: true });
+      setRawSchema(schema_json);
       setMessage("New schema version published. Surveyors will see the updated form.");
       load();
     } catch (e) {
       setMessage((e as Error).message);
     }
   };
+
   return (
     <>
-      <Heading eyebrow="Super admin" title="Questionnaire schema" action={<button className="button" onClick={save}>Publish new version</button>} />
+      <Heading
+        eyebrow="Super admin"
+        title="Questionnaire schema"
+        action={
+          <button className="button" onClick={save}>
+            Publish new version
+          </button>
+        }
+      />
       <GlassPanel>
         <p className="muted">Only super admin can add/remove/reorder questions. Admin cannot change form architecture.</p>
         <div className="toolbar">
@@ -321,8 +592,91 @@ export function SchemaEditor() {
             <option value="structure_inventory">Structure Inventory</option>
             <option value="utility_shifting">Utility Shifting</option>
           </select>
+          <select className="field" value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
+            {categoryKeys.map((k) => (
+              <option key={k} value={k}>
+                {k.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
         </div>
-        <textarea className="field code" value={json} onChange={(e) => setJson(e.target.value)} spellCheck={false} />
+
+        <div className="schema-builder">
+          {questions.map((q, index) => (
+            <div key={q.id} className="schema-question">
+              <div className="schema-question-row">
+                <div className="schema-question-main">
+                  <label className="schema-label">Question {index + 1}</label>
+                  <input
+                    className="field schema-question-input"
+                    value={q.label}
+                    placeholder="Question text"
+                    onChange={(e) => updateQuestion(q.id, { label: e.target.value })}
+                  />
+                  {needsOptions(q.uiType) ? (
+                    <div className="schema-answers">
+                      {q.options.map((opt, i) => (
+                        <input
+                          key={`${q.id}-opt-${i}`}
+                          className="field schema-answer"
+                          value={opt}
+                          placeholder={i === 0 ? "Answer (fixed panel)" : "Answer option"}
+                          onChange={(e) => {
+                            const next = [...q.options];
+                            next[i] = e.target.value;
+                            updateQuestion(q.id, { options: next });
+                          }}
+                        />
+                      ))}
+                      <input
+                        className="field schema-answer draft"
+                        value={draftOption[q.id] || ""}
+                        placeholder="Type here"
+                        onChange={(e) => setDraftOption((d) => ({ ...d, [q.id]: e.target.value }))}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                <div className="schema-type-col">
+                  <label className="schema-label">
+                    Question Type <span className="schema-icon filter" title="Filter" />
+                  </label>
+                  <div className="schema-type-wrap">
+                    <select
+                      className="field schema-type"
+                      value={q.uiType}
+                      onChange={(e) => {
+                        const uiType = e.target.value as UiQuestionType;
+                        updateQuestion(q.id, {
+                          uiType,
+                          options: needsOptions(uiType) ? q.options.length ? q.options : [""] : [],
+                        });
+                      }}
+                    >
+                      {UI_TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="schema-icon dropdown" title="Drop down" />
+                  </div>
+                  {needsOptions(q.uiType) ? (
+                    <button className="button secondary schema-add-answer" type="button" onClick={() => addAnswerPanel(q.id)}>
+                      Add Answer Panel
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="toolbar" style={{ marginTop: 16 }}>
+          <button className="button secondary" type="button" onClick={addQuestion}>
+            Add Question
+          </button>
+        </div>
         {message && <p className="muted">{message}</p>}
       </GlassPanel>
     </>
