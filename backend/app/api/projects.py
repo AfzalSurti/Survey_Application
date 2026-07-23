@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models import PreSurveyEntry, Project, ProjectAssignment, User, UserRole
+from app.models import PreSurveyEntry, Project, ProjectAssignment, SurveyPhoto, SurveyRecord, User, UserRole
 from app.schemas.survey import (
     PreSurveyEntryCreate,
     PreSurveyEntryOut,
@@ -85,6 +85,23 @@ async def create_project(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.super_admin)),
 ) -> ProjectOut:
+    number = body.project_number.strip()
+    name = body.name.strip()
+    highway = body.highway_number.strip()
+    if not name or not number or not highway:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Project name, project number, and highway number are required.",
+        )
+
+    # Prevent accidental duplicates from retries / double-clicks.
+    existing = await db.scalar(select(Project).where(Project.project_number == number))
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A project with number “{number}” already exists. Use a different number or delete the old project first.",
+        )
+
     key_name = body.key_engineer_name
     if body.key_engineer_id and not key_name:
         eng = await db.scalar(select(User).where(User.id == body.key_engineer_id))
@@ -98,9 +115,9 @@ async def create_project(
         surveyor_ids = [user.id]
 
     project = Project(
-        name=body.name,
-        project_number=body.project_number,
-        highway_number=body.highway_number,
+        name=name,
+        project_number=number,
+        highway_number=highway,
         key_engineer_id=body.key_engineer_id,
         key_engineer_name=key_name,
         created_by=user.id,
@@ -140,6 +157,44 @@ async def get_project(
     if user.role == UserRole.surveyor and user.id not in {a.surveyor_id for a in project.assignments}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not assigned to this project")
     return _project_out(project)
+
+
+@router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.super_admin)),
+) -> None:
+    project = await _load_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+
+    record_ids = list(
+        (await db.execute(select(SurveyRecord.id).where(SurveyRecord.project_id == project_id))).scalars().all()
+    )
+    if record_ids:
+        photos = (
+            await db.execute(select(SurveyPhoto).where(SurveyPhoto.survey_record_id.in_(record_ids)))
+        ).scalars().all()
+        for photo in photos:
+            await db.delete(photo)
+        await db.flush()
+        records = (
+            await db.execute(select(SurveyRecord).where(SurveyRecord.id.in_(record_ids)))
+        ).scalars().all()
+        for record in records:
+            await db.delete(record)
+        await db.flush()
+
+    pre_entries = (
+        await db.execute(select(PreSurveyEntry).where(PreSurveyEntry.project_id == project_id))
+    ).scalars().all()
+    for entry in pre_entries:
+        await db.delete(entry)
+    await db.flush()
+
+    await db.delete(project)
+    await db.flush()
 
 
 @router.put("/projects/{project_id}/assignments", response_model=ProjectOut)

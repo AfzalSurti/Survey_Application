@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { Plus, Search, Trash2, X } from "lucide-react";
 import { client, fetchDashboard, fetchRecords, type DashboardSummary, type Project, type RecordItem, type ReportTemplate, type User } from "../api/client";
@@ -168,17 +168,37 @@ export function Records() {
   const structuresForProject = (projectId: string) =>
     records.filter((r) => r.project_id === projectId);
 
-  const openDetails = (r: RecordItem) => {
-    const siblings = structuresForProject(r.project_id);
+  const openDetails = async (r: RecordItem) => {
     setSelected(r);
-    setProjectStructures(siblings.length ? siblings : [r]);
     setActiveStructureId(r.id);
+    try {
+      const siblings = await fetchRecords(r.project_id);
+      const list = siblings.length ? siblings : [r];
+      setProjectStructures(list);
+      setRecords((prev) => {
+        const byId = new Map(prev.map((x) => [x.id, x]));
+        for (const s of list) byId.set(s.id, s);
+        return Array.from(byId.values());
+      });
+    } catch {
+      const siblings = structuresForProject(r.project_id);
+      setProjectStructures(siblings.length ? siblings : [r]);
+    }
   };
 
-  const openPreview = (mode: "excel" | "word", r: RecordItem) => {
-    const siblings = structuresForProject(r.project_id);
-    setPreviewRecords(siblings.length ? siblings : [r]);
-    setPreview(mode);
+  const openPreview = async (mode: "excel" | "word", r: RecordItem) => {
+    setBusy(true);
+    try {
+      const siblings = await fetchRecords(r.project_id);
+      setPreviewRecords(siblings.length ? siblings : [r]);
+      setPreview(mode);
+    } catch {
+      const siblings = structuresForProject(r.project_id);
+      setPreviewRecords(siblings.length ? siblings : [r]);
+      setPreview(mode);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const saveCorrections = async () => {
@@ -1123,6 +1143,7 @@ export function ProjectsPage() {
   const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [fieldUsers, setFieldUsers] = useState<User[]>([]);
+  const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({
     name: "",
     project_number: "",
@@ -1140,23 +1161,58 @@ export function ProjectsPage() {
   useEffect(reload, []);
 
   const create = async () => {
+    if (busy) return;
     if (!form.name.trim() || !form.project_number.trim() || !form.highway_number.trim()) {
       alert("Project name, project number, and highway number are all required.");
       return;
     }
+    const number = form.project_number.trim();
+    if (projects.some((p) => p.project_number === number)) {
+      alert(`A project with number “${number}” already exists. Delete it first or use a different number.`);
+      return;
+    }
     const surveyor_ids = form.surveyor_id ? [form.surveyor_id] : user?.id ? [user.id] : [];
+    setBusy(true);
     try {
-      await client.post("/projects", {
-        name: form.name,
-        project_number: form.project_number,
-        highway_number: form.highway_number,
+      const created = await client.post<Project>("/projects", {
+        name: form.name.trim(),
+        project_number: number,
+        highway_number: form.highway_number.trim(),
         key_engineer_id: form.key_engineer_id || null,
         surveyor_ids,
       });
       setForm({ name: "", project_number: "", highway_number: "", key_engineer_id: "", surveyor_id: "" });
-      reload();
+      setProjects((list) => [created, ...list.filter((p) => p.id !== created.id)]);
     } catch (e) {
       alert((e as Error).message || "Could not create project.");
+      reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removeProject = async (p: Project, e: MouseEvent) => {
+    e.stopPropagation();
+    if (busy) return;
+    if (
+      !window.confirm(
+        `Delete project “${p.name}” (#${p.project_number})?\n\nThis also deletes its survey records and photos. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await client.delete(`/projects/${p.id}`);
+      setProjects((list) => list.filter((x) => x.id !== p.id));
+      if (selected?.id === p.id) {
+        setSelected(null);
+        setAssignIds([]);
+      }
+    } catch (err) {
+      alert((err as Error).message || "Could not delete project.");
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1166,7 +1222,8 @@ export function ProjectsPage() {
   };
 
   const saveAssign = async () => {
-    if (!selected) return;
+    if (!selected || busy) return;
+    setBusy(true);
     try {
       const updated = await client.put<Project>(`/projects/${selected.id}/assignments`, { surveyor_ids: assignIds });
       setProjects((list) => list.map((p) => (p.id === updated.id ? updated : p)));
@@ -1174,6 +1231,8 @@ export function ProjectsPage() {
       alert("Assignments updated.");
     } catch (e) {
       alert((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -1185,12 +1244,12 @@ export function ProjectsPage() {
       <div className="split">
         <GlassPanel>
           <h2>Create project</h2>
-          <div className="form-row"><label>Project name</label><input className="field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-          <div className="form-row"><label>Project number</label><input className="field" value={form.project_number} onChange={(e) => setForm({ ...form, project_number: e.target.value })} /></div>
-          <div className="form-row"><label>Highway number</label><input className="field" value={form.highway_number} onChange={(e) => setForm({ ...form, highway_number: e.target.value })} /></div>
+          <div className="form-row"><label>Project name</label><input className="field" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={busy} /></div>
+          <div className="form-row"><label>Project number</label><input className="field" value={form.project_number} onChange={(e) => setForm({ ...form, project_number: e.target.value })} disabled={busy} /></div>
+          <div className="form-row"><label>Highway number</label><input className="field" value={form.highway_number} onChange={(e) => setForm({ ...form, highway_number: e.target.value })} disabled={busy} /></div>
           <div className="form-row">
             <label>Name of Key Engineer / Highway Engineer</label>
-            <select className="field" value={form.key_engineer_id} onChange={(e) => setForm({ ...form, key_engineer_id: e.target.value })}>
+            <select className="field" value={form.key_engineer_id} onChange={(e) => setForm({ ...form, key_engineer_id: e.target.value })} disabled={busy}>
               <option value="">Select key engineer</option>
               {fieldUsers.map((u) => (
                 <option key={u.id} value={u.id}>{u.name} ({u.email}) — {roleLabel(u.role)}</option>
@@ -1199,7 +1258,7 @@ export function ProjectsPage() {
           </div>
           <div className="form-row">
             <label>Name of Surveyor (Field person)</label>
-            <select className="field" value={form.surveyor_id} onChange={(e) => setForm({ ...form, surveyor_id: e.target.value })}>
+            <select className="field" value={form.surveyor_id} onChange={(e) => setForm({ ...form, surveyor_id: e.target.value })} disabled={busy}>
               <option value="">Use logged-in user ({user?.email})</option>
               {fieldUsers.map((u) => (
                 <option key={u.id} value={u.id}>{u.name} ({u.email}) — {roleLabel(u.role)}</option>
@@ -1210,24 +1269,42 @@ export function ProjectsPage() {
             Email for field assignment: <strong className="mono">{selectedSurveyor?.email || user?.email || "—"}</strong>
             {" "}(auto-assigned to this project so they can continue survey work).
           </p>
-          <button className="button" onClick={create}><Plus size={15} /> Create project</button>
+          <button className="button" onClick={create} disabled={busy}>
+            <Plus size={15} /> {busy ? "Working…" : "Create project"}
+          </button>
         </GlassPanel>
         <GlassPanel>
-          <h2>All projects</h2>
+          <h2>All projects ({projects.length})</h2>
           <div className="table-wrap">
             <table className="table">
               <thead>
-                <tr><th>Name</th><th>Number</th><th>Key Engineer</th><th>Field users</th></tr>
+                <tr><th>Name</th><th>Number</th><th>Key Engineer</th><th>Field users</th><th>Actions</th></tr>
               </thead>
               <tbody>
                 {projects.map((p) => (
-                  <tr key={p.id} onClick={() => openAssign(p)}>
+                  <tr key={p.id} onClick={() => openAssign(p)} style={{ cursor: "pointer" }}>
                     <td>{p.name}</td>
                     <td className="mono">{p.project_number}</td>
                     <td>{p.key_engineer_name || "—"}</td>
                     <td>{p.surveyor_ids?.length || 0}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="schema-trash"
+                        title="Delete project"
+                        disabled={busy}
+                        onClick={(e) => removeProject(p, e)}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
+                {!projects.length && (
+                  <tr>
+                    <td colSpan={5} className="muted">No projects yet.</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -1240,7 +1317,7 @@ export function ProjectsPage() {
                   {s.name} ({s.email}) — {roleLabel(s.role)}
                 </label>
               ))}
-              <button className="button" onClick={saveAssign}>Save assignments</button>
+              <button className="button" onClick={saveAssign} disabled={busy}>Save assignments</button>
             </div>
           )}
         </GlassPanel>

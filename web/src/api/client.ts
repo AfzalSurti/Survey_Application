@@ -48,17 +48,29 @@ export type DashboardSummary = {
 /** Production API base (Render). Falls back to baked Render URL if env missing. */
 const API_BASE = apiBaseUrl();
 
-const api = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
+const api = async <T>(path: string, options: RequestInit = {}, retried = false): Promise<T> => {
   const token = localStorage.getItem("access_token");
   const url = `${API_BASE}/api${path}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+  } catch {
+    if (!retried) {
+      const { wakeServer } = await import("../lib/wakeServer");
+      await wakeServer({ maxMs: 90_000 });
+      return api<T>(path, options, true);
+    }
+    throw new Error(
+      "Could not reach the server (Failed to fetch). The API may be waking up — wait a few seconds and try again.",
+    );
+  }
   if (!response.ok) {
     const text = await response.text();
     let detail = "";
@@ -138,9 +150,21 @@ export const client = {
   },
 };
 
-export async function fetchRecords(): Promise<RecordItem[]> {
-  const page = await client.get<{ items: RecordItem[] }>("/records?page_size=200");
-  return page.items ?? [];
+export async function fetchRecords(projectId?: string): Promise<RecordItem[]> {
+  const qs = new URLSearchParams({ page_size: "500" });
+  if (projectId) qs.set("project_id", projectId);
+  const page = await client.get<{ items: RecordItem[]; total: number }>(`/records?${qs}`);
+  const items = page.items ?? [];
+  // If more pages exist, pull the rest so previews are complete.
+  const total = page.total ?? items.length;
+  if (total <= items.length) return items;
+  const pages = Math.ceil(total / 500);
+  const rest: RecordItem[] = [...items];
+  for (let p = 2; p <= pages; p++) {
+    const next = await client.get<{ items: RecordItem[] }>(`/records?${qs}&page=${p}`);
+    rest.push(...(next.items ?? []));
+  }
+  return rest;
 }
 
 export async function fetchDashboard(): Promise<DashboardSummary> {

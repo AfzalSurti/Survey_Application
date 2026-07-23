@@ -84,7 +84,7 @@ async def list_records(
     date_from: datetime | None = None,
     date_to: datetime | None = None,
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SurveyRecordPage:
