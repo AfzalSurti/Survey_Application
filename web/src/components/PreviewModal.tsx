@@ -53,7 +53,8 @@ async function fetchPhotoObjectUrl(photoId: string): Promise<string | null> {
   return URL.createObjectURL(await res.blob());
 }
 
-function buildQaRows(r: RecordItem): [string, string][] {
+/** Same Q&A layout as Word report preview (Sr. No / Description / Data). */
+function buildReportRows(r: RecordItem): [string, string][] {
   const responses = (r.responses_json || {}) as Record<string, unknown>;
   const gps = responses.gps as { latitude?: number; longitude?: number } | undefined;
   const lat = gps?.latitude ?? r.latitude;
@@ -61,20 +62,17 @@ function buildQaRows(r: RecordItem): [string, string][] {
   const coords = lat != null && lon != null ? `${lat}, ${lon}` : "—";
 
   const rows: [string, string][] = [
-    ["Name of Road / Project", String(responses.name_of_road ?? r.project_name ?? "—")],
+    ["Name of Road", String(responses.name_of_road ?? r.project_name ?? "—")],
     [
-      "Location of structure in Km.",
+      "Location of bridge / structure in Km.",
       `${r.chainage || "—"} — ${categoryLabel(r.structure_category).toUpperCase()}`,
     ],
     ["Coordinates", coords],
-    ["Structure Category", categoryLabel(r.structure_category)],
-    ["Chainage", r.chainage || "—"],
-    ["Status", r.status],
   ];
 
   for (const [key, value] of Object.entries(responses)) {
-    if (SKIP_KEYS.has(key)) continue;
-    const label = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    if (SKIP_KEYS.has(key) || key === "name_of_road") continue;
+    const label = key.replace(/_/g, " ");
     const data = value == null || value === "" ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value);
     rows.push([label, data]);
   }
@@ -222,43 +220,37 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
                   </tbody>
                 </table>
               ) : (
-                <table className="excel-table">
-                  <thead>
-                    <tr>
-                      <th>Sr. No.</th>
-                      <th>Chainage</th>
-                      <th>Field</th>
-                      <th>Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredByTab.flatMap((r, idx) => {
-                      const entries = Object.entries(r.responses_json || {}).filter(([k]) => !SKIP_KEYS.has(k));
-                      if (!entries.length) {
-                        return [
-                          <tr key={`${r.id}-empty`}>
-                            <td>{idx + 1}</td>
-                            <td className="mono">{r.chainage}</td>
-                            <td colSpan={2}>No field answers yet</td>
-                          </tr>,
-                        ];
-                      }
-                      return entries.map(([k, v], i) => (
-                        <tr key={`${r.id}-${k}`}>
-                          <td>{i === 0 ? idx + 1 : ""}</td>
-                          <td className="mono">{i === 0 ? r.chainage : ""}</td>
-                          <td>{k.replace(/_/g, " ")}</td>
-                          <td>{typeof v === "object" ? JSON.stringify(v) : String(v ?? "—")}</td>
-                        </tr>
-                      ));
-                    })}
-                    {!filteredByTab.length && (
-                      <tr>
-                        <td colSpan={4}>No structures in this category yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                <div className="excel-category-reports">
+                  {filteredByTab.map((r, idx) => {
+                    const rows = buildReportRows(r);
+                    return (
+                      <section key={r.id} className="report-block">
+                        <h3>
+                          Table {idx + 1} {categoryLabel(r.structure_category)} at Chainage Km {r.chainage || "—"}
+                        </h3>
+                        <table className="report-table">
+                          <thead>
+                            <tr>
+                              <th>Sr. No.</th>
+                              <th>Description</th>
+                              <th>Data</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.map(([desc, data], i) => (
+                              <tr key={`${r.id}-${i}`}>
+                                <td>{i + 1}</td>
+                                <td>{desc}</td>
+                                <td>{data}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </section>
+                    );
+                  })}
+                  {!filteredByTab.length && <div className="empty">No structures in this category yet.</div>}
+                </div>
               )}
             </div>
             <div className="excel-tabs">
@@ -284,7 +276,7 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
             <div className="report-scroll">
               {records.map((r, idx) => {
                 const structureNo = idx + 1;
-                const rows = buildQaRows(r);
+                const rows = buildReportRows(r);
                 const photos = photoUrls[r.id] || [];
                 const pages = chunk(photos, 4);
                 return (

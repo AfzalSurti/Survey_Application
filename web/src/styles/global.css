@@ -203,10 +203,12 @@ h1,h2,h3 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: 
 }
 .work-empty { margin: 10px 0 0; color: #ddd; font-size: .9rem; }
 .schema-toolbar-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.report-block h3 { text-align: center; margin: 0 0 10px; font-size: 1rem; }
+.excel-category-reports { display: grid; gap: 18px; padding: 12px; }
+.report-block h3 { text-align: center; margin: 0 0 10px; font-size: 1rem; color: #1B4F8C; font-weight: 700; }
 .report-table { width: 100%; border-collapse: collapse; font-size: .88rem; background: #fff; }
-.report-table th { background: #9FD3E8; padding: 8px 10px; border: 1px solid #7bb8cf; text-align: left; }
+.report-table th { background: #9FD3E8; padding: 8px 10px; border: 1px solid #7bb8cf; text-align: left; color: #0f2f4d; }
 .report-table td { padding: 8px 10px; border: 1px solid #d7e6ee; }
+.report-table tbody tr:nth-child(even) { background: #f7fbfd; }
 .schema-builder { display: grid; gap: 14px; margin-top: 12px; }
 .schema-question { border: 1px solid rgba(27,79,140,.12); border-radius: 16px; padding: 14px; background: rgba(255,255,255,.45); }
 .schema-question-row { display: grid; grid-template-columns: 1.4fr .9fr; gap: 14px; }
