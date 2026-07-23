@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models import ReportTemplate, SurveyModule, User, UserRole
+from app.models import ReportTemplate, User, UserRole
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "uploads" / "templates"
@@ -23,12 +23,16 @@ DEFAULT_TEMPLATE = Path(__file__).resolve().parents[2] / "templates" / "structur
 MAX_BYTES = 8 * 1024 * 1024  # 8 MB
 
 
+def _module_str(value: object) -> str:
+    return str(value.value if hasattr(value, "value") else value)
+
+
 class TemplateOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
     name: str
-    module: SurveyModule
+    module: str
     is_active: bool
     created_at: object | None = None
     file_name: str | None = None
@@ -44,7 +48,7 @@ def _to_out(row: ReportTemplate, *, is_builtin: bool = False) -> TemplateOut:
     return TemplateOut(
         id=row.id,
         name=row.name,
-        module=row.module,
+        module=_module_str(row.module),
         is_active=row.is_active,
         created_at=row.created_at,
         file_name=_file_name_from_path(row.template_docx_path),
@@ -66,8 +70,8 @@ async def list_templates(
             TemplateOut(
                 id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
                 name="Built-in default (structure inventory)",
-                module=SurveyModule.structure_inventory,
-                is_active=not any(r.is_active for r in rows if r.module == SurveyModule.structure_inventory),
+                module="structure_inventory",
+                is_active=not any(r.is_active for r in rows if _module_str(r.module) == "structure_inventory"),
                 created_at=None,
                 file_name=DEFAULT_TEMPLATE.name,
                 has_file=True,
@@ -86,13 +90,12 @@ async def upload_template(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.super_admin)),
 ) -> TemplateOut:
-    try:
-        module_enum = SurveyModule(module)
-    except ValueError as exc:
+    module_key = module.strip().lower().replace(" ", "_")
+    if not module_key:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Module must be structure_inventory or utility_shifting.",
-        ) from exc
+            detail="Module is required.",
+        )
 
     display_name = name.strip()
     if not display_name:
@@ -129,13 +132,13 @@ async def upload_template(
     if activate:
         await db.execute(
             update(ReportTemplate)
-            .where(ReportTemplate.module == module_enum)
+            .where(ReportTemplate.module == module_key)
             .values(is_active=False)
         )
 
     row = ReportTemplate(
         name=display_name,
-        module=module_enum,
+        module=module_key,
         template_docx_path=str(local_path),
         docx_bytes=raw,
         is_active=activate,
@@ -157,14 +160,14 @@ async def activate_template(
         # Activate built-in = deactivate all custom structure templates
         await db.execute(
             update(ReportTemplate)
-            .where(ReportTemplate.module == SurveyModule.structure_inventory)
+            .where(ReportTemplate.module == "structure_inventory")
             .values(is_active=False)
         )
         await db.flush()
         return TemplateOut(
             id=template_id,
             name="Built-in default (structure inventory)",
-            module=SurveyModule.structure_inventory,
+            module="structure_inventory",
             is_active=True,
             file_name=DEFAULT_TEMPLATE.name,
             has_file=DEFAULT_TEMPLATE.is_file(),
@@ -243,7 +246,7 @@ async def download_template(
     )
 
 
-async def resolve_template_bytes(db: AsyncSession, module: SurveyModule | None = None) -> tuple[bytes | None, Path | None]:
+async def resolve_template_bytes(db: AsyncSession, module: str | None = None) -> tuple[bytes | None, Path | None]:
     """Return DOCX bytes and/or a filesystem path for report generation."""
 
     async def _from_row(row: ReportTemplate | None) -> tuple[bytes | None, Path | None]:
@@ -258,9 +261,10 @@ async def resolve_template_bytes(db: AsyncSession, module: SurveyModule | None =
         return None, None
 
     if module is not None:
+        module_key = str(module.value if hasattr(module, "value") else module)
         row = await db.scalar(
             select(ReportTemplate)
-            .where(ReportTemplate.is_active.is_(True), ReportTemplate.module == module)
+            .where(ReportTemplate.is_active.is_(True), ReportTemplate.module == module_key)
             .order_by(ReportTemplate.created_at.desc())
             .limit(1)
         )

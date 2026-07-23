@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models import SurveyModule, SurveyStatus, SyncStatus
+from app.models import SurveyStatus, SyncStatus
 
 
 class ProjectCreate(BaseModel):
@@ -163,7 +163,7 @@ class SettingOut(BaseModel):
 class QuestionnaireSchemaCreate(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
-    module: SurveyModule
+    module: str = Field(min_length=1, max_length=100)
     version: int | None = Field(default=None, ge=1)
     schema_json: dict[str, Any]
     is_active: bool = True

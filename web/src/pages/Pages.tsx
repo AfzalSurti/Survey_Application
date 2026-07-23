@@ -556,12 +556,48 @@ function parseQuestion(q: Record<string, unknown>): EditableQuestion {
 
 export function SchemaEditor() {
   const [module, setModule] = useState("structure_inventory");
+  const [modules, setModules] = useState<{ value: string; label: string }[]>([
+    { value: "structure_inventory", label: "Structure Inventory" },
+    { value: "utility_shifting", label: "Utility Shifting" },
+  ]);
   const [rawSchema, setRawSchema] = useState<Record<string, unknown>>({});
   const [categoryKey, setCategoryKey] = useState("");
   const [questions, setQuestions] = useState<EditableQuestion[]>([]);
   const [history, setHistory] = useState<EditableQuestion[][]>([]);
   const [message, setMessage] = useState("");
   const [draftOption, setDraftOption] = useState<Record<string, string>>({});
+
+  const toKey = (label: string) =>
+    label
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_|_$/g, "");
+
+  const labelize = (key: string) =>
+    key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const refreshModules = async () => {
+    try {
+      const rows = await client.get<{ module: string }[]>("/schemas");
+      const seen = new Set<string>();
+      const next: { value: string; label: string }[] = [];
+      for (const row of rows) {
+        if (seen.has(row.module)) continue;
+        seen.add(row.module);
+        next.push({ value: row.module, label: labelize(row.module) });
+      }
+      if (!next.length) {
+        next.push(
+          { value: "structure_inventory", label: "Structure Inventory" },
+          { value: "utility_shifting", label: "Utility Shifting" },
+        );
+      }
+      setModules(next);
+    } catch {
+      /* keep defaults */
+    }
+  };
 
   const categoryKeys = useMemo(() => {
     const cats = (rawSchema.categories || {}) as Record<string, unknown>;
@@ -605,8 +641,9 @@ export function SchemaEditor() {
       .then((s) => {
         const x = s[0];
         if (!x) {
-          setMessage("No schema for this module yet.");
-          setRawSchema({});
+          setMessage("No schema for this module yet. Add a structure and publish, or create a new survey.");
+          setRawSchema({ categories: {} });
+          setCategoryKey("");
           setQuestions([]);
           return;
         }
@@ -615,16 +652,89 @@ export function SchemaEditor() {
         const key = categoryKey && cats.includes(categoryKey) ? categoryKey : cats[0] || "";
         setCategoryKey(key);
         if (key) loadCategory(x.schema_json, key);
+        else {
+          setQuestions([]);
+          setHistory([]);
+        }
         setMessage(`Loaded schema v${x.version}`);
       })
       .catch((e) => setMessage((e as Error).message));
   };
+
+  useEffect(() => {
+    refreshModules();
+  }, []);
 
   useEffect(load, [module]);
 
   useEffect(() => {
     if (categoryKey && rawSchema.categories) loadCategory(rawSchema, categoryKey);
   }, [categoryKey]);
+
+  const addSurvey = async () => {
+    const label = window.prompt("New survey name (e.g. Bridge Inspection)");
+    if (!label?.trim()) return;
+    const key = toKey(label);
+    if (!key) {
+      alert("Enter a valid survey name.");
+      return;
+    }
+    if (modules.some((m) => m.value === key)) {
+      setModule(key);
+      setMessage(`Switched to existing survey “${labelize(key)}”.`);
+      return;
+    }
+    try {
+      await client.post("/schemas", {
+        module: key,
+        schema_json: { categories: {} },
+        is_active: true,
+      });
+      await refreshModules();
+      setModule(key);
+      setMessage(`Created survey “${labelize(key)}”. Add structures, then publish questions.`);
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+
+  const addStructure = () => {
+    const label = window.prompt("New structure name (e.g. pipe culvert)");
+    if (!label?.trim()) return;
+    const key = toKey(label);
+    if (!key) {
+      alert("Enter a valid structure name.");
+      return;
+    }
+    const cats = { ...((rawSchema.categories || {}) as Record<string, unknown>) };
+    if (cats[key]) {
+      setCategoryKey(key);
+      setMessage(`Structure “${labelize(key)}” already exists.`);
+      return;
+    }
+    cats[key] = { questions: [] };
+    setRawSchema({ ...rawSchema, categories: cats });
+    setCategoryKey(key);
+    setQuestions([]);
+    setHistory([]);
+    setMessage(`Added structure “${labelize(key)}”. Add questions, then Publish new version.`);
+  };
+
+  const removeStructure = () => {
+    if (!categoryKey) {
+      alert("Select a structure to remove.");
+      return;
+    }
+    if (!window.confirm(`Remove structure “${labelize(categoryKey)}” from this survey? Publish to save the change.`)) return;
+    const cats = { ...((rawSchema.categories || {}) as Record<string, unknown>) };
+    delete cats[categoryKey];
+    const nextKeys = Object.keys(cats);
+    setRawSchema({ ...rawSchema, categories: cats });
+    setCategoryKey(nextKeys[0] || "");
+    setQuestions([]);
+    setHistory([]);
+    setMessage(`Removed “${labelize(categoryKey)}”. Click Publish new version to save.`);
+  };
 
   const updateQuestion = (id: string, patch: Partial<EditableQuestion>, trackUndo = false) => {
     if (trackUndo) {
@@ -681,34 +791,41 @@ export function SchemaEditor() {
 
   const save = async () => {
     try {
+      if (!categoryKey && Object.keys((rawSchema.categories || {}) as object).length === 0) {
+        alert("Add at least one structure before publishing.");
+        return;
+      }
       const cats = { ...((rawSchema.categories || {}) as Record<string, unknown>) };
-      cats[categoryKey] = {
-        ...((cats[categoryKey] as object) || {}),
-        questions: questions.map((q) => {
-          const mapped = fromUiType(q.uiType);
-          const item: Record<string, unknown> = {
-            id: q.id,
-            label: q.label.trim() || q.id,
-            type: mapped.type,
-            required: q.required,
-          };
-          if (mapped.ui) item.ui = mapped.ui;
-          if (q.uiType === "multiple_selection" || q.uiType === "dropdown_1_row") {
-            item.options = q.options.map((o) => o.trim()).filter(Boolean);
-          }
-          if (isMatrixType(q.uiType)) {
-            item.columns = q.columns;
-            item.matrix_rows = q.matrixRows;
-            item.options = matrixToOptions(q.uiType, q.matrixRows);
-          }
-          return item;
-        }),
-      };
+      if (categoryKey) {
+        cats[categoryKey] = {
+          ...((cats[categoryKey] as object) || {}),
+          questions: questions.map((q) => {
+            const mapped = fromUiType(q.uiType);
+            const item: Record<string, unknown> = {
+              id: q.id,
+              label: q.label.trim() || q.id,
+              type: mapped.type,
+              required: q.required,
+            };
+            if (mapped.ui) item.ui = mapped.ui;
+            if (q.uiType === "multiple_selection" || q.uiType === "dropdown_1_row") {
+              item.options = q.options.map((o) => o.trim()).filter(Boolean);
+            }
+            if (isMatrixType(q.uiType)) {
+              item.columns = q.columns;
+              item.matrix_rows = q.matrixRows;
+              item.options = matrixToOptions(q.uiType, q.matrixRows);
+            }
+            return item;
+          }),
+        };
+      }
       const schema_json = { ...rawSchema, categories: cats };
       await client.post("/schemas", { module, schema_json, is_active: true });
       setRawSchema(schema_json);
       setMessage("New schema version published. Surveyors will see the updated form.");
       setHistory([]);
+      await refreshModules();
       load();
     } catch (e) {
       setMessage((e as Error).message);
@@ -807,18 +924,31 @@ export function SchemaEditor() {
       />
       <GlassPanel>
         <p className="muted">Make the form here and publish a new version — no coding required. Only super admin can change form architecture.</p>
-        <div className="toolbar">
-          <select className="field" value={module} onChange={(e) => setModule(e.target.value)}>
-            <option value="structure_inventory">Structure Inventory</option>
-            <option value="utility_shifting">Utility Shifting</option>
+        <div className="toolbar schema-toolbar-actions">
+          <select className="field" value={module} onChange={(e) => setModule(e.target.value)} title="Survey type">
+            {modules.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
           </select>
-          <select className="field" value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)}>
+          <button className="button secondary" type="button" onClick={addSurvey} title="Add a new survey type">
+            <Plus size={14} /> Add Survey
+          </button>
+          <select className="field" value={categoryKey} onChange={(e) => setCategoryKey(e.target.value)} title="Structure type">
+            {!categoryKeys.length && <option value="">No structures yet</option>}
             {categoryKeys.map((k) => (
               <option key={k} value={k}>
                 {k.replace(/_/g, " ")}
               </option>
             ))}
           </select>
+          <button className="button secondary" type="button" onClick={addStructure} title="Add a new structure type">
+            <Plus size={14} /> Add Structure
+          </button>
+          <button className="button secondary" type="button" onClick={removeStructure} title="Remove selected structure" disabled={!categoryKey}>
+            <Trash2 size={14} /> Remove Structure
+          </button>
           <button className="button secondary" type="button" onClick={undo} title="Undo last change (like Ctrl+Z)">
             Back
           </button>
@@ -1162,7 +1292,7 @@ export function Templates() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
-  const [module, setModule] = useState<"structure_inventory" | "utility_shifting">("structure_inventory");
+  const [module, setModule] = useState("structure_inventory");
   const [activate, setActivate] = useState(true);
   const [file, setFile] = useState<File | null>(null);
 
@@ -1257,10 +1387,8 @@ export function Templates() {
         <GlassPanel>
           <h2>Upload DOCX template</h2>
           <p className="muted">
-            Uploaded templates are stored in the database and used from <strong>Records → Preview Word Report</strong>. Use{" "}
-            <code className="mono">{"{{ project_name }}"}</code>, <code className="mono">{"{{ chainage }}"}</code>,{" "}
-            <code className="mono">{"{{ structure_category }}"}</code>, <code className="mono">{"{{ observations }}"}</code>,{" "}
-            <code className="mono">{"{{ recommendations }}"}</code> placeholders in Word.
+            Optional legacy DOCX templates. <strong>Records → Preview Word Report</strong> downloads an editable work
+            report (Q&amp;A page + photo pages) generated automatically from survey data.
           </p>
           {!isSuper ? (
             <p className="notice">View-only: ask a super admin to upload or activate templates.</p>
@@ -1272,10 +1400,12 @@ export function Templates() {
               </div>
               <div className="form-row">
                 <label>Module</label>
-                <select className="field" value={module} onChange={(e) => setModule(e.target.value as typeof module)}>
-                  <option value="structure_inventory">Structure Inventory</option>
-                  <option value="utility_shifting">Utility Survey</option>
-                </select>
+                <input
+                  className="field"
+                  value={module}
+                  onChange={(e) => setModule(e.target.value)}
+                  placeholder="e.g. structure_inventory"
+                />
               </div>
               <div className="form-row">
                 <label>DOCX file</label>

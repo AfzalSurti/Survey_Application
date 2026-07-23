@@ -78,7 +78,7 @@ async def seed() -> None:
         ):
             result = await db.execute(
                 select(QuestionnaireSchema).where(
-                    QuestionnaireSchema.module == module,
+                    QuestionnaireSchema.module == (module.value if hasattr(module, "value") else str(module)),
                     QuestionnaireSchema.version == schema["version"],
                 )
             )
@@ -86,7 +86,7 @@ async def seed() -> None:
                 db.add(
                     QuestionnaireSchema(
                         id=uuid.uuid4(),
-                        module=module,
+                        module=module.value if hasattr(module, "value") else str(module),
                         version=schema["version"],
                         schema_json=schema,
                         is_active=True,
@@ -94,7 +94,7 @@ async def seed() -> None:
                     )
                 )
                 print(
-                    f"Seeded {module.value} v{schema['version']} "
+                    f"Seeded {getattr(module, 'value', module)} v{schema['version']} "
                     f"({count_questions(schema)} category questions)"
                 )
             else:

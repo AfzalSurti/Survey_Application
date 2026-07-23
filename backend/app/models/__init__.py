@@ -133,10 +133,7 @@ class QuestionnaireSchema(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    module: Mapped[SurveyModule] = mapped_column(
-        Enum(SurveyModule, name="survey_module", values_callable=lambda enum: [e.value for e in enum]),
-        nullable=False,
-    )
+    module: Mapped[str] = mapped_column(String(100), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -223,15 +220,7 @@ class ReportTemplate(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255), nullable=False, default="Untitled template")
-    module: Mapped[SurveyModule] = mapped_column(
-        Enum(
-            SurveyModule,
-            name="survey_module",
-            create_type=False,
-            values_callable=lambda enum: [e.value for e in enum],
-        ),
-        nullable=False,
-    )
+    module: Mapped[str] = mapped_column(String(100), nullable=False)
     template_docx_path: Mapped[str] = mapped_column(Text, nullable=False)
     docx_bytes: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

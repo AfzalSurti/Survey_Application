@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models import QuestionnaireSchema, SurveyModule, User, UserRole
+from app.models import QuestionnaireSchema, User, UserRole
 from app.schemas.survey import QuestionnaireSchemaActivation, QuestionnaireSchemaCreate
 
 
@@ -18,7 +18,7 @@ class SchemaOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
     id: str
-    module: SurveyModule
+    module: str
     version: int
     schema_json: dict
     is_active: bool
@@ -27,7 +27,7 @@ class SchemaOut(BaseModel):
     def from_orm_row(cls, row: QuestionnaireSchema) -> "SchemaOut":
         return cls(
             id=str(row.id),
-            module=row.module,
+            module=str(row.module.value if hasattr(row.module, "value") else row.module),
             version=row.version,
             schema_json=row.schema_json,
             is_active=row.is_active,
@@ -36,7 +36,7 @@ class SchemaOut(BaseModel):
 
 @router.get("", response_model=list[SchemaOut])
 async def list_schemas(
-    module: SurveyModule | None = None,
+    module: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> list[SchemaOut]:
@@ -53,18 +53,21 @@ async def create_schema_version(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.super_admin)),
 ) -> SchemaOut:
+    module = body.module.strip().lower().replace(" ", "_")
+    if not module:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Module is required")
     version = body.version
     if version is None:
         latest = await db.scalar(
             select(QuestionnaireSchema.version)
-            .where(QuestionnaireSchema.module == body.module)
+            .where(QuestionnaireSchema.module == module)
             .order_by(QuestionnaireSchema.version.desc())
             .limit(1)
         )
         version = (latest or 0) + 1
     existing = await db.scalar(
         select(QuestionnaireSchema).where(
-            QuestionnaireSchema.module == body.module,
+            QuestionnaireSchema.module == module,
             QuestionnaireSchema.version == version,
         )
     )
@@ -73,14 +76,14 @@ async def create_schema_version(
     if body.is_active:
         active = await db.execute(
             select(QuestionnaireSchema).where(
-                QuestionnaireSchema.module == body.module,
+                QuestionnaireSchema.module == module,
                 QuestionnaireSchema.is_active.is_(True),
             )
         )
         for row in active.scalars():
             row.is_active = False
     schema = QuestionnaireSchema(
-        module=body.module,
+        module=module,
         version=version,
         schema_json=body.schema_json,
         is_active=body.is_active,
@@ -104,19 +107,20 @@ async def get_active_schemas(
     )
     rows = result.scalars().all()
     # One active per module (highest version if multiple flagged)
-    seen: set[SurveyModule] = set()
+    seen: set[str] = set()
     out: list[SchemaOut] = []
     for row in rows:
-        if row.module in seen:
+        mod = str(row.module.value if hasattr(row.module, "value") else row.module)
+        if mod in seen:
             continue
-        seen.add(row.module)
+        seen.add(mod)
         out.append(SchemaOut.from_orm_row(row))
     return out
 
 
 @router.get("/{module}/active")
 async def get_active_schema_for_module(
-    module: SurveyModule,
+    module: str,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SchemaOut:

@@ -84,7 +84,7 @@ const api = async <T>(path: string, options: RequestInit = {}): Promise<T> => {
 export type ReportTemplate = {
   id: string;
   name: string;
-  module: "structure_inventory" | "utility_shifting";
+  module: string;
   is_active: boolean;
   created_at?: string | null;
   file_name?: string | null;
