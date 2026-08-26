@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import * as Location from "expo-location";
+import NetInfo from "@react-native-community/netinfo";
 import { CommonActions } from "@react-navigation/native";
 import { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -489,7 +490,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       id: newId(),
       module,
       category,
-      chainage: String(answers.chainage ?? ""),
+      chainage: String(answers.chainage ?? "").trim(),
       responses: {
         ...answers,
         structure_category: category,
@@ -503,11 +504,38 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       syncStatus: "pending",
       schemaVersion: schema.version,
     };
+    if (!record.chainage) {
+      return reasonAlert("Chainage required", "Enter chainage before submitting this structure.");
+    }
     await saveRecord(record);
     for (const uri of photos) await addPhoto(record.id, uri);
-    Alert.alert("Saved locally", "The completed record is ready to sync.", [
-      { text: "Done", onPress: () => navigation.navigate("Main") },
-    ]);
+
+    const net = await NetInfo.fetch();
+    if (net.isConnected) {
+      const result = await syncPending();
+      if (result.error && result.synced === 0) {
+        Alert.alert(
+          "Saved on device",
+          `Could not reach the server yet (${result.error}). It will sync automatically when you are online.`,
+          [{ text: "Done", onPress: () => navigation.navigate("Main") }],
+        );
+        return;
+      }
+      Alert.alert(
+        "Survey submitted",
+        result.error
+          ? `Synced with warnings: ${result.error}`
+          : "This structure is on the server. Admins and Super Admins can see it now.",
+        [{ text: "Done", onPress: () => navigation.navigate("Main") }],
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Saved offline",
+      "No network right now. This survey will upload automatically when the device is online.",
+      [{ text: "Done", onPress: () => navigation.navigate("Main") }],
+    );
   };
 
   const renderQuestion = (q: Question) => {
@@ -702,12 +730,42 @@ export function DashboardScreen({ navigation }: TabProps<"Dashboard">) {
         onPress={() => {
           Alert.alert(
             "Submit entire project?",
-            "This ends the current field session and returns you to sign-in after you confirm. Sync pending records from the Sync tab first if needed.",
+            "This uploads any remaining offline surveys, then ends the field session and returns you to sign-in.",
             [
               { text: "Cancel", style: "cancel" },
               {
-                text: "Go to Sign in",
+                text: "Submit & Sign out",
                 onPress: async () => {
+                  const result = await syncPending();
+                  if (result.error && result.synced === 0) {
+                    reasonAlert(
+                      "Could not finish submit",
+                      `${result.error}\n\nStay signed in, open Sync, and try again when online.`,
+                    );
+                    return;
+                  }
+                  if (result.error) {
+                    Alert.alert(
+                      "Partially synced",
+                      `${result.error}\n\nYou can sign out now, or stay and sync the rest.`,
+                      [
+                        { text: "Stay", style: "cancel" },
+                        {
+                          text: "Sign out",
+                          onPress: async () => {
+                            await logout();
+                            navigation.getParent()?.dispatch(
+                              CommonActions.reset({
+                                index: 0,
+                                routes: [{ name: "Login" }],
+                              }),
+                            );
+                          },
+                        },
+                      ],
+                    );
+                    return;
+                  }
                   await logout();
                   navigation.getParent()?.dispatch(
                     CommonActions.reset({

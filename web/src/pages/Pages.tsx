@@ -148,19 +148,21 @@ export function Records() {
     });
   }, [records, query, filters]);
 
-  /** One display row per project (entire project data), using the newest structure as the summary row. */
+  /** Project summary rows with structure counts so admins see every structure in the drawer. */
   const projectRows = useMemo(() => {
-    const byProject = new Map<string, RecordItem>();
+    const byProject = new Map<string, { row: RecordItem; count: number; statuses: string[] }>();
     for (const r of filtered) {
       const key = r.project_id || r.id;
       const prev = byProject.get(key);
       if (!prev) {
-        byProject.set(key, r);
+        byProject.set(key, { row: r, count: 1, statuses: [r.status] });
         continue;
       }
-      const prevTime = Date.parse(prev.complete_date || prev.updated_at || prev.created_at || "") || 0;
+      prev.count += 1;
+      prev.statuses.push(r.status);
+      const prevTime = Date.parse(prev.row.complete_date || prev.row.updated_at || prev.row.created_at || "") || 0;
       const nextTime = Date.parse(r.complete_date || r.updated_at || r.created_at || "") || 0;
-      if (nextTime >= prevTime) byProject.set(key, r);
+      if (nextTime >= prevTime) prev.row = r;
     }
     return Array.from(byProject.values());
   }, [filtered]);
@@ -259,6 +261,10 @@ export function Records() {
         action={<span className="muted">{projectRows.length} project(s) · {filtered.length} structure(s)</span>}
       />
       <GlassPanel>
+        <p className="muted" style={{ marginBottom: 10 }}>
+          Each project row opens <strong>all surveyed structures</strong> for that project. Excel/Report Preview includes every
+          structure.
+        </p>
         <div className="toolbar">
           <div style={{ position: "relative", flex: 1 }}>
             <Search size={15} style={{ position: "absolute", left: 10, top: 10, color: "#627b95" }} />
@@ -295,54 +301,67 @@ export function Records() {
               </tr>
             </thead>
             <tbody>
-              {projectRows.map((r) => (
-                <tr key={r.project_id || r.id}>
-                  <td>{r.project_name || "—"}</td>
-                  <td className="mono">{r.project_number || "—"}</td>
-                  <td>{r.survey_type || "—"}</td>
-                  <td>{r.key_engineer_name || "—"}</td>
-                  <td>{r.head_surveyor_name || "—"}</td>
-                  <td>{fmt(r.assign_date)}</td>
-                  <td>{fmt(r.complete_date)}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="link-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openDetails(r);
-                      }}
-                      title="Open record details"
-                    >
-                      <StatusBadge status={r.status} />
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="link-btn preview-link"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openPreview("excel", r);
-                      }}
-                    >
-                      Preview
-                    </button>
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="link-btn preview-link"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openPreview("word", r);
-                      }}
-                    >
-                      Preview
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {projectRows.map(({ row: r, count, statuses }) => {
+                const summaryStatus =
+                  statuses.includes("submitted") || statuses.includes("draft")
+                    ? statuses.includes("submitted")
+                      ? "submitted"
+                      : "draft"
+                    : statuses.includes("approved")
+                      ? "approved"
+                      : r.status;
+                return (
+                  <tr key={r.project_id || r.id}>
+                    <td>{r.project_name || "—"}</td>
+                    <td className="mono">{r.project_number || "—"}</td>
+                    <td>{r.survey_type || "—"}</td>
+                    <td>{r.key_engineer_name || "—"}</td>
+                    <td>{r.head_surveyor_name || "—"}</td>
+                    <td>{fmt(r.assign_date)}</td>
+                    <td>{fmt(r.complete_date)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="link-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDetails(r);
+                        }}
+                        title="Open all structures for this project"
+                      >
+                        <StatusBadge status={summaryStatus} />
+                        <span className="muted" style={{ marginLeft: 6 }}>
+                          {count} structure{count === 1 ? "" : "s"}
+                        </span>
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="link-btn preview-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPreview("excel", r);
+                        }}
+                      >
+                        Preview
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="link-btn preview-link"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openPreview("word", r);
+                        }}
+                      >
+                        Preview
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {!projectRows.length && <div className="empty">No survey records match these filters.</div>}

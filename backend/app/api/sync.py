@@ -10,7 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
 from app.database import get_db
-from app.models import AppSetting, Project, ProjectAssignment, SurveyPhoto, SurveyRecord, SyncStatus, User, UserRole
+from app.models import (
+    AppSetting,
+    Project,
+    ProjectAssignment,
+    SurveyPhoto,
+    SurveyRecord,
+    SurveyStatus,
+    SyncStatus,
+    User,
+    UserRole,
+)
 from app.schemas.survey import SyncSurveyRecordRequest, SyncSurveyRecordResponse, SurveyPhotoOut
 from app.services.google_drive import upload_photo
 from app.services.google_sheets import append_or_update_record
@@ -88,15 +98,23 @@ async def sync_survey_record(
     user: User = Depends(get_current_user),
 ) -> SyncSurveyRecordResponse:
     project = await _get_project(body, db, user)
-    record = await db.scalar(
-        select(SurveyRecord).where(
-            SurveyRecord.project_id == project.id,
-            SurveyRecord.chainage == body.chainage,
+
+    record: SurveyRecord | None = None
+    if body.client_id:
+        record = await db.scalar(select(SurveyRecord).where(SurveyRecord.client_id == body.client_id))
+    if record is None:
+        record = await db.scalar(
+            select(SurveyRecord).where(
+                SurveyRecord.project_id == project.id,
+                SurveyRecord.chainage == body.chainage,
+                SurveyRecord.structure_category == body.structure_category,
+            )
         )
-    )
+
     created = record is None
     if record is None:
         record = SurveyRecord(
+            client_id=body.client_id,
             project_id=project.id,
             surveyor_id=user.id,
             structure_category=body.structure_category,
@@ -106,17 +124,26 @@ async def sync_survey_record(
             latitude=body.latitude,
             longitude=body.longitude,
             captured_at=body.captured_at,
+            status=SurveyStatus.submitted,
+            sync_status=SyncStatus.synced,
         )
         db.add(record)
     else:
         if user.role == UserRole.surveyor and record.surveyor_id != user.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Record belongs to another surveyor")
+        if body.client_id and not record.client_id:
+            record.client_id = body.client_id
         record.structure_category = body.structure_category
         record.schema_version = body.schema_version
         record.responses_json = body.responses_json
         record.latitude = body.latitude
         record.longitude = body.longitude
         record.captured_at = body.captured_at
+        # Field sync always means the surveyor submitted this structure.
+        if record.status in {SurveyStatus.draft, SurveyStatus.submitted}:
+            record.status = SurveyStatus.submitted
+        record.sync_status = SyncStatus.synced
+
     await db.flush()
 
     sheet_settings = await _setting_value(db, "google_sheets")
@@ -131,7 +158,6 @@ async def sync_survey_record(
         ],
         settings=sheet_settings,
     )
-    record.sync_status = SyncStatus.synced
     await db.flush()
     await db.refresh(record)
     return SyncSurveyRecordResponse(id=record.id, sheets_row_id=record.sheets_row_id, created=created)

@@ -63,6 +63,11 @@ export async function initDb() {
   } catch {
     /* exists */
   }
+  try {
+    await db.execAsync("ALTER TABLE survey_records ADD COLUMN server_id TEXT");
+  } catch {
+    /* exists */
+  }
   return db;
 }
 const database = async () => db ?? initDb();
@@ -166,6 +171,10 @@ export async function pendingPhotos(id: string) {
     "SELECT * FROM survey_photos WHERE survey_record_id=? AND sync_status!='synced'",
     id,
   );
+}
+
+export async function setServerId(localId: string, serverId: string) {
+  await (await database()).runAsync("UPDATE survey_records SET server_id=? WHERE id=?", serverId, localId);
 }
 
 export async function markSynced(id: string) {

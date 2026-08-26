@@ -144,10 +144,16 @@ class QuestionnaireSchema(Base):
 class SurveyRecord(Base):
     __tablename__ = "survey_records"
     __table_args__ = (
-        UniqueConstraint("project_id", "chainage", name="uq_survey_project_chainage"),
+        UniqueConstraint(
+            "project_id",
+            "chainage",
+            "structure_category",
+            name="uq_survey_project_chainage_category",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_id: Mapped[str | None] = mapped_column(String(255), nullable=True, unique=True)
     project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
     surveyor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     structure_category: Mapped[str] = mapped_column(Text, nullable=False)
