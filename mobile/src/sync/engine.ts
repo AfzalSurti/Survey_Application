@@ -1,19 +1,30 @@
 import NetInfo from "@react-native-community/netinfo";
-import { api } from "@/api/client";
+import { api, ensureAuth, isAuthErrorMessage } from "@/api/client";
 import { markPhotosSynced, markSynced, pendingPhotos, pendingSync, setServerId } from "@/db";
 
 type SyncRecordResponse = { id: string; sheets_row_id?: string | null; created?: boolean };
 
-let syncInFlight: Promise<{ synced: number; error?: string }> | null = null;
+let syncInFlight: Promise<{ synced: number; error?: string; authFailed?: boolean }> | null = null;
 
-export async function syncPending(): Promise<{ synced: number; error?: string }> {
+export async function syncPending(): Promise<{ synced: number; error?: string; authFailed?: boolean }> {
   if (syncInFlight) return syncInFlight;
   syncInFlight = (async () => {
     if (!(await NetInfo.fetch()).isConnected) {
       return { synced: 0, error: "No network connection — will sync automatically when online." };
     }
+
+    const authed = await ensureAuth();
+    if (!authed) {
+      return {
+        synced: 0,
+        authFailed: true,
+        error: "Session expired — sign in again, then open Sync to upload pending surveys.",
+      };
+    }
+
     let synced = 0;
     const errors: string[] = [];
+    let authFailed = false;
     const pending = await pendingSync();
     for (const record of pending) {
       try {
@@ -56,14 +67,15 @@ export async function syncPending(): Promise<{ synced: number; error?: string }>
         await markSynced(record.id);
         synced += 1;
       } catch (e) {
-        errors.push(
-          `${record.chainage || record.category || record.id}: ${e instanceof Error ? e.message : "Sync failed"}`,
-        );
+        const msg = e instanceof Error ? e.message : "Sync failed";
+        if (isAuthErrorMessage(msg)) authFailed = true;
+        errors.push(`${record.chainage || record.category || record.id}: ${msg}`);
       }
     }
     if (errors.length) {
       return {
         synced,
+        authFailed,
         error:
           synced > 0
             ? `Synced ${synced} record(s). Some failed: ${errors.slice(0, 3).join(" | ")}`

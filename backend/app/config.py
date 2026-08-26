@@ -36,7 +36,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("JWT_SECRET_KEY", "jwt_secret_key"),
     )
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = 60 * 12  # 12 hours — field surveys often last longer than 1 hour
     refresh_token_expire_days: int = 30
 
     cors_origins: str = Field(

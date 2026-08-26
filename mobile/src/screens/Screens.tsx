@@ -514,9 +514,17 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
     if (net.isConnected) {
       const result = await syncPending();
       if (result.error && result.synced === 0) {
+        if (result.authFailed) {
+          Alert.alert(
+            "Sign in required",
+            "Your session expired. Surveys are saved on this phone. Sign in again, then open the Sync tab to upload them — admins will see them after sync.",
+            [{ text: "OK", onPress: () => navigation.navigate("Main") }],
+          );
+          return;
+        }
         Alert.alert(
           "Saved on device",
-          `Could not reach the server yet (${result.error}). It will sync automatically when you are online.`,
+          `Upload did not finish (${result.error}). Open the Sync tab and tap Sync now.`,
           [{ text: "Done", onPress: () => navigation.navigate("Main") }],
         );
         return;
