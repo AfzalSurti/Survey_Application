@@ -36,8 +36,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("JWT_SECRET_KEY", "jwt_secret_key"),
     )
     jwt_algorithm: str = "HS256"
-    access_token_expire_minutes: int = 60 * 12  # 12 hours — field surveys often last longer than 1 hour
-    refresh_token_expire_days: int = 30
+    # Long-lived access tokens: field devices work offline for days at a time and
+    # the shipped mobile build authenticates with the access token only (it never
+    # calls /api/auth/refresh). A short expiry means every sync 401s ~12h after
+    # login until the surveyor manually signs out and back in, so their captured
+    # structures never reach the server/admin portal. Keep this large so a single
+    # login keeps a device syncing for a full survey deployment.
+    access_token_expire_minutes: int = 60 * 24 * 365  # 1 year
+    refresh_token_expire_days: int = 365
 
     cors_origins: str = Field(
         default=(
