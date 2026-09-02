@@ -59,6 +59,18 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok", "app": cfg.app_name}
 
+    @app.get("/api/health/integrations")
+    async def health_integrations():
+        """Reports which optional integrations are configured. No secrets returned."""
+        import os
+
+        from app.services.cloudinary_store import _ensure_configured
+
+        return {
+            "cloudinary": bool(_ensure_configured()),
+            "google_service_account": bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")),
+        }
+
     @app.get("/api/health/ready")
     async def health_ready():
         """Checks DB connectivity and that the users table is queryable."""
