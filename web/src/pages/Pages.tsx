@@ -72,6 +72,21 @@ function SurveyRowsTable({ records, showComplete }: { records: RecordItem[]; sho
   );
 }
 
+/** A real, directly-embeddable remote image URL (Cloudinary CDN etc.) — not a stub. */
+function remoteImageUrl(u?: string | null): string | null {
+  if (!u || !/^https?:\/\//.test(u)) return null;
+  if (u.includes("stub-drive") || u.includes("stub-sheet")) return null;
+  if (u.includes("drive.google.com")) return null; // Drive "view" links aren't image bytes
+  return u;
+}
+
+/** Ask Cloudinary for a resized/optimised variant when the URL is one of theirs. */
+function cloudinaryVariant(u: string, transform: string): string {
+  return u.includes("res.cloudinary.com") && u.includes("/upload/")
+    ? u.replace("/upload/", `/upload/${transform}/`)
+    : u;
+}
+
 function PhotoGallery({ recordId }: { recordId: string }) {
   const [meta, setMeta] = useState<PhotoMeta[] | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
@@ -89,6 +104,9 @@ function PhotoGallery({ recordId }: { recordId: string }) {
         if (!alive) return;
         setMeta(list);
         for (const p of list) {
+          // Cloud-hosted photos are public CDN URLs — embed straight away.
+          if (remoteImageUrl(p.drive_url)) continue;
+          // Otherwise it only exists as a file on the API server — fetch with auth.
           try {
             const u = await fetchPhotoObjectUrl(p.id);
             if (!alive) {
@@ -117,13 +135,16 @@ function PhotoGallery({ recordId }: { recordId: string }) {
     <>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
         {meta.map((p) => {
-          const src = urls[p.id];
-          return src ? (
+          const remote = remoteImageUrl(p.drive_url);
+          const full = remote || urls[p.id];
+          const thumb = remote ? cloudinaryVariant(remote, "w_200,h_200,c_fill,q_auto,f_auto") : urls[p.id];
+          return full ? (
             <img
               key={p.id}
-              src={src}
+              src={thumb}
               alt={p.file_name}
-              onClick={() => setZoom(src)}
+              onClick={() => setZoom(full)}
+              loading="lazy"
               style={{
                 width: 92,
                 height: 92,
@@ -151,13 +172,7 @@ function PhotoGallery({ recordId }: { recordId: string }) {
                 color: "#627b95",
               }}
             >
-              {p.drive_url && !p.drive_url.includes("stub-drive") ? (
-                <a href={p.drive_url} target="_blank" rel="noreferrer">
-                  Open in Drive
-                </a>
-              ) : (
-                "image not on server"
-              )}
+              image not on server
             </div>
           );
         })}

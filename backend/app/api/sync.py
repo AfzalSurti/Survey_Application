@@ -23,6 +23,7 @@ from app.models import (
     UserRole,
 )
 from app.schemas.survey import SyncSurveyRecordRequest, SyncSurveyRecordResponse, SurveyPhotoOut
+from app.services.cloudinary_store import upload_image
 from app.services.google_drive import upload_photo
 from app.services.google_sheets import append_or_update_record
 
@@ -212,8 +213,16 @@ async def sync_photo(
     with local_path.open("wb") as destination:
         shutil.copyfileobj(file.file, destination)
     try:
-        drive_settings = await _setting_value(db, "google_drive")
-        drive_file_id, drive_url = await upload_photo(local_path, settings=drive_settings)
+        # Durable storage first: Cloudinary CDN. Falls back to Google Drive, then
+        # to a stub id — sync must never fail because image hosting is down.
+        cloud_id, cloud_url = await upload_image(
+            local_path, folder=f"gdrpl-survey/{record.project_id}"
+        )
+        if cloud_url:
+            drive_file_id, drive_url = f"cloudinary:{cloud_id}", cloud_url
+        else:
+            drive_settings = await _setting_value(db, "google_drive")
+            drive_file_id, drive_url = await upload_photo(local_path, settings=drive_settings)
     finally:
         await file.close()
 

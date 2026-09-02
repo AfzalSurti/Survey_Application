@@ -3,7 +3,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -85,10 +85,11 @@ async def download_photo_file(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
     path = Path(photo.local_path)
     if not path.is_file():
-        if photo.drive_url:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Local photo file missing; open drive_url from photo metadata instead.",
-            )
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Photo file not found on server")
+        remote = photo.drive_url or ""
+        if remote.startswith("http") and "stub-drive" not in remote:
+            return RedirectResponse(url=remote)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Photo file not found on server and no cloud copy is available.",
+        )
     return FileResponse(path, filename=photo.file_name or path.name)

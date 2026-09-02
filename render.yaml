@@ -20,3 +20,6 @@ services:
         value: "false"
       - key: CORS_ORIGINS
         value: https://survey-application-teal.vercel.app,http://localhost:5173,http://localhost:8081
+      # Durable photo storage — set in the Render dashboard (Environment tab).
+      - key: CLOUDINARY_URL
+        sync: false

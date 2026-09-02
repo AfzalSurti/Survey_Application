@@ -55,6 +55,25 @@ class Settings(BaseSettings):
 
     min_photo_count: int = 4
 
+    # Cloudinary — durable storage for field photos (Render's disk is ephemeral).
+    # Set CLOUDINARY_URL, or the three separate vars below.
+    cloudinary_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("CLOUDINARY_URL", "cloudinary_url"),
+    )
+    cloudinary_cloud_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("CLOUDINARY_CLOUD_NAME", "cloudinary_cloud_name"),
+    )
+    cloudinary_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("CLOUDINARY_API_KEY", "cloudinary_api_key"),
+    )
+    cloudinary_api_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("CLOUDINARY_API_SECRET", "cloudinary_api_secret"),
+    )
+
     @property
     def async_database_url(self) -> str:
         """SQLAlchemy async URL; SSL is passed via connect_args (see database.py)."""
