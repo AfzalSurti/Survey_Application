@@ -1,15 +1,16 @@
+import logging
 import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
-from app.database import get_db
+from app.database import AsyncSessionLocal, get_db
 from app.models import (
     AppSetting,
     Project,
@@ -26,6 +27,7 @@ from app.services.google_drive import upload_photo
 from app.services.google_sheets import append_or_update_record
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
 
@@ -33,6 +35,39 @@ UPLOADS_DIR = Path(__file__).resolve().parents[2] / "uploads"
 async def _setting_value(db: AsyncSession, key: str) -> dict[str, Any]:
     setting = await db.scalar(select(AppSetting).where(AppSetting.key == key))
     return setting.value_json if setting else {}
+
+
+async def _mirror_record_to_sheets(record_id: UUID) -> None:
+    """Push a synced record to Google Sheets after the response is sent.
+
+    Runs in its own session so a slow (or misconfigured) Sheets API never
+    delays the surveyor's sync request. Best-effort: failures are logged only.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            record = await session.scalar(
+                select(SurveyRecord).where(SurveyRecord.id == record_id)
+            )
+            if record is None:
+                return
+            project = await session.scalar(
+                select(Project).where(Project.id == record.project_id)
+            )
+            settings = await _setting_value(session, "google_sheets")
+            record.sheets_row_id = await append_or_update_record(
+                chainage=record.chainage,
+                values=[
+                    record.chainage,
+                    project.project_number if project else "",
+                    record.structure_category,
+                    record.status.value,
+                    str(record.surveyor_id),
+                ],
+                settings=settings,
+            )
+            await session.commit()
+    except Exception:
+        logger.exception("Background Google Sheets mirror failed for record %s", record_id)
 
 
 async def _assert_surveyor_assigned(db: AsyncSession, user: User, project_id) -> None:
@@ -94,6 +129,7 @@ async def _get_project(
 @router.post("/survey-records", response_model=SyncSurveyRecordResponse)
 async def sync_survey_record(
     body: SyncSurveyRecordRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> SyncSurveyRecordResponse:
@@ -145,22 +181,14 @@ async def sync_survey_record(
         record.sync_status = SyncStatus.synced
 
     await db.flush()
-
-    sheet_settings = await _setting_value(db, "google_sheets")
-    record.sheets_row_id = await append_or_update_record(
-        chainage=record.chainage,
-        values=[
-            record.chainage,
-            project.project_number,
-            record.structure_category,
-            record.status.value,
-            str(record.surveyor_id),
-        ],
-        settings=sheet_settings,
-    )
-    await db.flush()
     await db.refresh(record)
-    return SyncSurveyRecordResponse(id=record.id, sheets_row_id=record.sheets_row_id, created=created)
+
+    # Mirror to Google Sheets AFTER responding — the surveyor's record is already
+    # saved and visible to admins; the spreadsheet copy must never slow the sync.
+    record_id = record.id
+    existing_row = record.sheets_row_id
+    background_tasks.add_task(_mirror_record_to_sheets, record_id)
+    return SyncSurveyRecordResponse(id=record_id, sheets_row_id=existing_row, created=created)
 
 
 @router.post("/photos", response_model=SurveyPhotoOut, status_code=status.HTTP_201_CREATED)
