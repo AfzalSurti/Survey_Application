@@ -1,7 +1,20 @@
 import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { Plus, Search, Trash2, X } from "lucide-react";
-import { client, fetchDashboard, fetchRecords, type DashboardSummary, type Project, type RecordItem, type ReportTemplate, type User } from "../api/client";
+import {
+  client,
+  fetchDashboard,
+  fetchRecordPhotos,
+  fetchPhotoObjectUrl,
+  fetchRecords,
+  type DashboardSummary,
+  type PhotoMeta,
+  type Project,
+  type RecordItem,
+  type ReportTemplate,
+  type User,
+} from "../api/client";
+import { useResource } from "../lib/useResource";
 import { useAuth } from "../auth/AuthContext";
 import { PreviewModal } from "../components/PreviewModal";
 import { ActionButton, GlassPanel, StatusBadge, roleLabel } from "../components/UI";
@@ -59,18 +72,134 @@ function SurveyRowsTable({ records, showComplete }: { records: RecordItem[]; sho
   );
 }
 
-export function Dashboard() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+function PhotoGallery({ recordId }: { recordId: string }) {
+  const [meta, setMeta] = useState<PhotoMeta[] | null>(null);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<string | null>(null);
+
   useEffect(() => {
-    fetchDashboard()
-      .then(setSummary)
-      .catch(() =>
-        setSummary({ total_projects: 0, complete_surveys: 0, ongoing_surveys: 0, complete_items: [], pending_items: [] }),
-      );
-  }, []);
+    let alive = true;
+    const made: string[] = [];
+    setMeta(null);
+    setUrls({});
+    setError(null);
+    fetchRecordPhotos(recordId)
+      .then(async (list) => {
+        if (!alive) return;
+        setMeta(list);
+        for (const p of list) {
+          try {
+            const u = await fetchPhotoObjectUrl(p.id);
+            if (!alive) {
+              URL.revokeObjectURL(u);
+              return;
+            }
+            made.push(u);
+            setUrls((prev) => ({ ...prev, [p.id]: u }));
+          } catch {
+            /* file gone from server (Render redeploy) — show a placeholder below */
+          }
+        }
+      })
+      .catch((e) => alive && setError((e as Error).message || "Could not load photos."));
+    return () => {
+      alive = false;
+      made.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [recordId]);
+
+  if (error) return <p className="muted">Photos: {error}</p>;
+  if (meta === null) return <p className="muted">Loading photos…</p>;
+  if (!meta.length) return <p className="muted">No photos captured for this structure.</p>;
+
   return (
     <>
-      <Heading eyebrow="Operations overview" title="Survey intelligence, at a glance" />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+        {meta.map((p) => {
+          const src = urls[p.id];
+          return src ? (
+            <img
+              key={p.id}
+              src={src}
+              alt={p.file_name}
+              onClick={() => setZoom(src)}
+              style={{
+                width: 92,
+                height: 92,
+                objectFit: "cover",
+                borderRadius: 10,
+                cursor: "zoom-in",
+                border: "1px solid rgba(27,79,140,0.18)",
+              }}
+            />
+          ) : (
+            <div
+              key={p.id}
+              title={p.file_name}
+              style={{
+                width: 92,
+                height: 92,
+                borderRadius: 10,
+                border: "1px dashed rgba(27,79,140,0.35)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: ".62rem",
+                textAlign: "center",
+                padding: 4,
+                color: "#627b95",
+              }}
+            >
+              {p.drive_url && !p.drive_url.includes("stub-drive") ? (
+                <a href={p.drive_url} target="_blank" rel="noreferrer">
+                  Open in Drive
+                </a>
+              ) : (
+                "image not on server"
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {zoom && (
+        <div
+          onClick={() => setZoom(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(4,12,24,0.82)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 60,
+            cursor: "zoom-out",
+          }}
+        >
+          <img src={zoom} alt="" style={{ maxWidth: "92vw", maxHeight: "92vh", borderRadius: 12 }} />
+        </div>
+      )}
+    </>
+  );
+}
+
+export function Dashboard() {
+  const { data: summary, loading, error } = useResource<DashboardSummary>("dashboard", fetchDashboard, {
+    pollMs: 30_000,
+  });
+  return (
+    <>
+      <Heading
+        eyebrow="Operations overview"
+        title="Survey intelligence, at a glance"
+        action={
+          loading && !summary ? (
+            <span className="muted">Loading…</span>
+          ) : error && !summary ? (
+            <span className="muted">Offline — retrying…</span>
+          ) : null
+        }
+      />
       <div className="grid stats stats-two">
         <GlassPanel>
           <div className="stat-label">Complete Survey</div>
@@ -120,9 +249,29 @@ export function Records() {
     complete_date: "",
   });
 
+  const { data: fetchedRecords, loading: recordsLoading, error: recordsError, refresh: refreshRecords } = useResource<RecordItem[]>(
+    "records",
+    () => fetchRecords(),
+    { pollMs: 30_000 },
+  );
+
+  // Keep a local copy so inline corrections / drawer merges survive background polls.
   useEffect(() => {
-    fetchRecords().then(setRecords).catch(() => setRecords([]));
-  }, []);
+    if (!fetchedRecords) return;
+    setRecords((prev) => {
+      const byId = new Map(prev.map((r) => [r.id, r]));
+      for (const r of fetchedRecords) {
+        const local = byId.get(r.id);
+        const localTs = Date.parse(local?.updated_at || "") || 0;
+        const incomingTs = Date.parse(r.updated_at || "") || 0;
+        if (!local || incomingTs >= localTs) byId.set(r.id, r);
+      }
+      const keep = new Set(fetchedRecords.map((r) => r.id));
+      // drop rows that no longer come back from the server
+      for (const id of byId.keys()) if (!keep.has(id)) byId.delete(id);
+      return Array.from(byId.values());
+    });
+  }, [fetchedRecords]);
 
   const activeStructure = projectStructures.find((r) => r.id === activeStructureId) || selected;
 
@@ -258,7 +407,16 @@ export function Records() {
       <Heading
         eyebrow="Review workspace"
         title="Survey records"
-        action={<span className="muted">{projectRows.length} project(s) · {filtered.length} structure(s)</span>}
+        action={
+          <span className="muted" style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+            {projectRows.length} project(s) · {filtered.length} structure(s)
+            {recordsLoading && records.length ? " · refreshing…" : ""}
+            {recordsError && !records.length ? " · offline, retrying…" : ""}
+            <button type="button" className="link-btn" onClick={() => refreshRecords()}>
+              Refresh
+            </button>
+          </span>
+        }
       />
       <GlassPanel>
         <p className="muted" style={{ marginBottom: 10 }}>
@@ -428,6 +586,13 @@ export function Records() {
               </tbody>
             </table>
           </div>
+
+          {activeStructure ? (
+            <>
+              <h3 style={{ marginTop: 4 }}>Photos — {activeStructure.chainage || "structure"}</h3>
+              <PhotoGallery recordId={activeStructure.id} />
+            </>
+          ) : null}
 
           {activeStructure && canCorrect ? (
             <>

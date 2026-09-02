@@ -170,3 +170,33 @@ export async function fetchRecords(projectId?: string): Promise<RecordItem[]> {
 export async function fetchDashboard(): Promise<DashboardSummary> {
   return client.get<DashboardSummary>("/records/dashboard");
 }
+
+export type PhotoMeta = {
+  id: string;
+  survey_record_id: string;
+  file_name: string;
+  drive_url?: string | null;
+  drive_file_id?: string | null;
+  sync_status: string;
+  taken_at?: string | null;
+  created_at?: string | null;
+};
+
+export async function fetchRecordPhotos(recordId: string): Promise<PhotoMeta[]> {
+  return client.get<PhotoMeta[]>(`/reports/records/${recordId}/photos`);
+}
+
+/**
+ * Photo bytes need the auth header, so we can't point <img src> straight at the
+ * endpoint — fetch as a blob and hand back an object URL. Callers must
+ * URL.revokeObjectURL() when done.
+ */
+export async function fetchPhotoObjectUrl(photoId: string): Promise<string> {
+  const token = localStorage.getItem("access_token");
+  const r = await fetch(`${API_BASE}/api/reports/photos/${photoId}/file`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    redirect: "follow",
+  });
+  if (!r.ok) throw new Error(`Photo unavailable (${r.status})`);
+  return URL.createObjectURL(await r.blob());
+}
