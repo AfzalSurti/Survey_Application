@@ -28,18 +28,21 @@ def _ensure_configured() -> bool:
         return _configured
 
     cfg = get_settings()
+    # Env values often arrive with a stray newline/space from a copy-paste — that
+    # corrupts the request signature ("Invalid Signature") without any other hint.
+    url = (cfg.cloudinary_url or "").strip()
+    name = (cfg.cloudinary_cloud_name or "").strip()
+    key = (cfg.cloudinary_api_key or "").strip()
+    secret = (cfg.cloudinary_api_secret or "").strip()
     try:
         import cloudinary
 
-        if cfg.cloudinary_url:
-            cloudinary.config(cloudinary_url=cfg.cloudinary_url, secure=True)
-        elif cfg.cloudinary_cloud_name and cfg.cloudinary_api_key and cfg.cloudinary_api_secret:
-            cloudinary.config(
-                cloud_name=cfg.cloudinary_cloud_name,
-                api_key=cfg.cloudinary_api_key,
-                api_secret=cfg.cloudinary_api_secret,
-                secure=True,
-            )
+        # Prefer the three explicit vars — more reliable than parsing a URL that
+        # may contain characters needing escaping.
+        if name and key and secret:
+            cloudinary.config(cloud_name=name, api_key=key, api_secret=secret, secure=True)
+        elif url:
+            cloudinary.config(cloudinary_url=url, secure=True)
         else:
             _configured = False
             return False
