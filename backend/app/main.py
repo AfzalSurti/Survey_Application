@@ -71,6 +71,38 @@ def create_app() -> FastAPI:
             "google_service_account": bool(os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")),
         }
 
+    @app.get("/api/health/cloudinary")
+    async def health_cloudinary():
+        """Attempts a real Cloudinary upload of a 1px image and reports the outcome.
+        Surfaces the actual error when photo uploads silently fall back to stubs."""
+        import io
+
+        from app.services.cloudinary_store import _ensure_configured
+
+        info: dict = {"configured": bool(_ensure_configured())}
+        try:
+            import cloudinary  # noqa: F401
+            import cloudinary.uploader
+
+            cfg_now = cloudinary.config()
+            info["cloud_name"] = cfg_now.cloud_name or None
+            info["has_api_key"] = bool(cfg_now.api_key)
+            info["has_api_secret"] = bool(cfg_now.api_secret)
+            # 1x1 transparent PNG
+            png = bytes.fromhex(
+                "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+                "0000000a49444154789c6360000000020001e221bc330000000049454e44ae426082"
+            )
+            res = cloudinary.uploader.upload(
+                io.BytesIO(png), folder="gdrpl-survey/_healthcheck", resource_type="image"
+            )
+            info["upload"] = "ok"
+            info["url"] = res.get("secure_url")
+        except Exception as exc:  # noqa: BLE001
+            info["upload"] = "failed"
+            info["error"] = f"{type(exc).__name__}: {str(exc)[:400]}"
+        return info
+
     @app.get("/api/health/ready")
     async def health_ready():
         """Checks DB connectivity and that the users table is queryable."""
