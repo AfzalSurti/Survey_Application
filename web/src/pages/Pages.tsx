@@ -80,6 +80,15 @@ function remoteImageUrl(u?: string | null): string | null {
   return u;
 }
 
+/** Photo synced before Cloudinary was enabled: only ever a stub id + a file on
+ *  Render's ephemeral disk, which is now wiped. The bytes are unrecoverable. */
+function isOrphanPhoto(p: PhotoMeta): boolean {
+  if (remoteImageUrl(p.drive_url)) return false;
+  const id = p.drive_file_id || "";
+  const url = p.drive_url || "";
+  return id.startsWith("stub-") || url.includes("stub-drive") || url.includes("drive.google.com");
+}
+
 /** Ask Cloudinary for a resized/optimised variant when the URL is one of theirs. */
 function cloudinaryVariant(u: string, transform: string): string {
   return u.includes("res.cloudinary.com") && u.includes("/upload/")
@@ -106,6 +115,8 @@ function PhotoGallery({ recordId }: { recordId: string }) {
         for (const p of list) {
           // Cloud-hosted photos are public CDN URLs — embed straight away.
           if (remoteImageUrl(p.drive_url)) continue;
+          // Pre-Cloudinary photos are gone for good — don't hammer the API with 404s.
+          if (isOrphanPhoto(p)) continue;
           // Otherwise it only exists as a file on the API server — fetch with auth.
           try {
             const u = await fetchPhotoObjectUrl(p.id);
@@ -131,8 +142,15 @@ function PhotoGallery({ recordId }: { recordId: string }) {
   if (meta === null) return <p className="muted">Loading photos…</p>;
   if (!meta.length) return <p className="muted">No photos captured for this structure.</p>;
 
+  const orphanCount = meta.filter(isOrphanPhoto).length;
+
   return (
     <>
+      {orphanCount > 0 && (
+        <p className="muted" style={{ marginBottom: 8, fontSize: ".72rem" }}>
+          {orphanCount} photo{orphanCount === 1 ? "" : "s"} captured before cloud storage was enabled — the image{orphanCount === 1 ? "" : "s"} can’t be recovered. Re-submit this structure from the phone to restore {orphanCount === 1 ? "it" : "them"}.
+        </p>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
         {meta.map((p) => {
           const remote = remoteImageUrl(p.drive_url);
@@ -166,13 +184,13 @@ function PhotoGallery({ recordId }: { recordId: string }) {
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: ".62rem",
+                fontSize: ".58rem",
                 textAlign: "center",
                 padding: 4,
                 color: "#627b95",
               }}
             >
-              image not on server
+              {isOrphanPhoto(p) ? "not in cloud — re-submit" : "image unavailable"}
             </div>
           );
         })}
