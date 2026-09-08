@@ -34,9 +34,17 @@ type Props = {
   records: RecordItem[];
   onClose: () => void;
   onDownloadWord: () => void;
+  onDownloadPdf: () => void;
   onDownloadExcel: () => void;
   busy?: boolean;
 };
+
+/** A real embeddable image URL (Cloudinary CDN etc.), not a stub / Drive view link. */
+function embeddableImageUrl(u?: string | null): string | null {
+  if (!u || !/^https?:\/\//.test(u)) return null;
+  if (u.includes("stub-") || u.includes("drive.google.com")) return null;
+  return u;
+}
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -80,7 +88,7 @@ function buildReportRows(r: RecordItem): [string, string][] {
 }
 
 /** Excel preview (tabbed) + Work Report preview (Page-1 Q&A + Page-2+ photo grids). */
-export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onDownloadExcel, busy }: Props) {
+export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onDownloadPdf, onDownloadExcel, busy }: Props) {
   const [tab, setTab] = useState("pre_survey");
   const [photoUrls, setPhotoUrls] = useState<Record<string, string[]>>({});
   const [photosLoading, setPhotosLoading] = useState(false);
@@ -106,12 +114,15 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
           const metas = await client.get<PhotoMeta[]>(`/reports/records/${record.id}/photos`);
           const urls: string[] = [];
           for (const meta of metas) {
+            const cdn = embeddableImageUrl(meta.drive_url);
+            if (cdn) {
+              urls.push(cdn);
+              continue;
+            }
             const blobUrl = await fetchPhotoObjectUrl(meta.id);
             if (blobUrl) {
               created.push(blobUrl);
               urls.push(blobUrl);
-            } else if (meta.drive_url) {
-              urls.push(meta.drive_url);
             }
           }
           next[record.id] = urls;
@@ -160,14 +171,24 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
                 Download File
               </ActionButton>
             ) : (
-              <ActionButton
-                className="button"
-                disabled={!records.length || busy}
-                disabledReason={!records.length ? "No project records to download." : "Download already in progress."}
-                onClick={onDownloadWord}
-              >
-                Download Editable DOCX
-              </ActionButton>
+              <>
+                <ActionButton
+                  className="button"
+                  disabled={!records.length || busy}
+                  disabledReason={!records.length ? "No project records to download." : "Download already in progress."}
+                  onClick={onDownloadPdf}
+                >
+                  Download PDF
+                </ActionButton>
+                <ActionButton
+                  className="button secondary"
+                  disabled={!records.length || busy}
+                  disabledReason={!records.length ? "No project records to download." : "Download already in progress."}
+                  onClick={onDownloadWord}
+                >
+                  Editable DOCX
+                </ActionButton>
+              </>
             )}
             <button className="button secondary" type="button" onClick={onClose} title="Close">
               <X size={16} /> Close
@@ -270,7 +291,7 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
           <>
             <p className="muted">
               Work report preview — Page-1 Q&amp;A table grows with answers; Page-2+ photo grids expand automatically (4 per
-              page). Download is an editable .docx.
+              page). Download as ready-to-share PDF or editable .docx — photos are pulled from cloud storage.
             </p>
             {photosLoading && <p className="muted">Loading photos…</p>}
             <div className="report-scroll">

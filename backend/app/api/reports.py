@@ -12,7 +12,12 @@ from app.core.deps import get_current_user
 from app.database import get_db
 from app.models import SurveyPhoto, SurveyRecord, User, UserRole
 from app.schemas.survey import GenerateReportRequest, SurveyPhotoOut
-from app.services.work_report import build_work_report_docx, load_records_for_report
+from app.services.work_report import (
+    build_work_report_docx,
+    build_work_report_pdf,
+    collect_photo_blobs,
+    load_records_for_report,
+)
 
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -26,26 +31,39 @@ def _remove_file(path: str) -> None:
 async def generate_report(
     body: GenerateReportRequest,
     background_tasks: BackgroundTasks,
+    fmt: str = "docx",
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FileResponse:
+    fmt = fmt.lower()
+    if fmt not in {"docx", "pdf"}:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="fmt must be docx or pdf")
+
     project_name, records = await load_records_for_report(db, body.record_ids)
     if len(records) != len(set(body.record_ids)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more survey records were not found")
     if user.role == UserRole.surveyor and any(record.surveyor_id != user.id for record in records):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report on another surveyor's records")
 
-    docx_bytes = build_work_report_docx(project_name=project_name, records=records)
-    output = tempfile.NamedTemporaryFile(prefix="gdrpl-work-report-", suffix=".docx", delete=False)
-    output.write(docx_bytes)
+    photo_blobs = await collect_photo_blobs(records)
+    if fmt == "pdf":
+        data = build_work_report_pdf(project_name=project_name, records=records, photo_blobs=photo_blobs)
+        suffix, media_type = ".pdf", "application/pdf"
+    else:
+        data = build_work_report_docx(project_name=project_name, records=records, photo_blobs=photo_blobs)
+        suffix = ".docx"
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    output = tempfile.NamedTemporaryFile(prefix="gdrpl-work-report-", suffix=suffix, delete=False)
+    output.write(data)
     output.close()
 
     safe_name = (project_name or "gdrpl-survey").replace(" ", "-")[:60]
     background_tasks.add_task(_remove_file, output.name)
     return FileResponse(
         output.name,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=f"{safe_name}-work-report.docx",
+        media_type=media_type,
+        filename=f"{safe_name}-work-report{suffix}",
         background=background_tasks,
     )
 

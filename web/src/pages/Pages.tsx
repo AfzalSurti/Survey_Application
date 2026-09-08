@@ -402,18 +402,20 @@ export function Records() {
     }
   };
 
-  const downloadWord = async () => {
+  const downloadReport = async (reportFmt: "docx" | "pdf") => {
     const ids = previewRecords.map((r) => r.id);
     if (!ids.length) return alert("No records to download.");
     setBusy(true);
     try {
-      await client.download("/reports/generate", { record_ids: ids }, "POST");
+      await client.download(`/reports/generate?fmt=${reportFmt}`, { record_ids: ids }, "POST");
     } catch (e) {
       alert((e as Error).message);
     } finally {
       setBusy(false);
     }
   };
+  const downloadWord = () => downloadReport("docx");
+  const downloadPdf = () => downloadReport("pdf");
   const downloadExcel = async () => {
     setBusy(true);
     try {
@@ -566,6 +568,7 @@ export function Records() {
         busy={busy}
         onClose={() => setPreview(null)}
         onDownloadWord={downloadWord}
+        onDownloadPdf={downloadPdf}
         onDownloadExcel={downloadExcel}
       />
 
