@@ -417,6 +417,20 @@ export function Records() {
   };
   const downloadWord = () => downloadReport("docx");
   const downloadPdf = () => downloadReport("pdf");
+
+  const deleteRecord = async (r: RecordItem) => {
+    if (!canCorrect) return;
+    if (!confirm(`Delete this structure?\n\n${(r.structure_category || "").replace(/_/g, " ")} · Chainage ${r.chainage || "—"} · ${r.project_name || ""}\n\nRemoves the record and its photos. Cannot be undone.`)) return;
+    try {
+      await client.delete(`/records/${r.id}`);
+      setRecords((x) => x.filter((y) => y.id !== r.id));
+      setProjectStructures((x) => x.filter((y) => y.id !== r.id));
+      if (selected?.id === r.id) setSelected(null);
+      refreshRecords();
+    } catch (e) {
+      alert((e as Error).message || "Could not delete record.");
+    }
+  };
   const downloadExcel = async () => {
     setBusy(true);
     try {
@@ -515,6 +529,7 @@ export function Records() {
                   <th>Captured</th>
                   <th>Status</th>
                   <th>Details</th>
+                  {canCorrect ? <th></th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -542,6 +557,21 @@ export function Records() {
                           View
                         </button>
                       </td>
+                      {canCorrect ? (
+                        <td>
+                          <button
+                            type="button"
+                            className="link-btn"
+                            title="Delete this structure"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteRecord(r);
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
               </tbody>

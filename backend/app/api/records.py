@@ -177,3 +177,17 @@ async def correct_record_data(
     await db.flush()
     await db.refresh(record)
     return (await enrich_records(db, [record]))[0]
+
+
+@router.delete("/{record_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_record(
+    record_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.admin, UserRole.super_admin)),
+) -> None:
+    """Delete a survey record and its photos (test rows, duplicates, bad captures)."""
+    record = await db.scalar(select(SurveyRecord).where(SurveyRecord.id == record_id))
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Survey record not found")
+    await db.delete(record)
+    await db.flush()
