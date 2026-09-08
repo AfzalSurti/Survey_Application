@@ -272,6 +272,7 @@ export function Records() {
   const [preview, setPreview] = useState<"excel" | "word" | null>(null);
   const [previewRecords, setPreviewRecords] = useState<RecordItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState<"projects" | "structures">("structures");
   const [filters, setFilters] = useState({
     project_name: "",
     project_number: "",
@@ -454,9 +455,30 @@ export function Records() {
         }
       />
       <GlassPanel>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <button
+            type="button"
+            className={`link-btn ${view === "structures" ? "" : "muted"}`}
+            style={{ fontWeight: view === "structures" ? 700 : 400 }}
+            onClick={() => setView("structures")}
+          >
+            Every structure
+          </button>
+          <span className="muted">·</span>
+          <button
+            type="button"
+            className={`link-btn ${view === "projects" ? "" : "muted"}`}
+            style={{ fontWeight: view === "projects" ? 700 : 400 }}
+            onClick={() => setView("projects")}
+          >
+            Grouped by project
+          </button>
+        </div>
         <p className="muted" style={{ marginBottom: 10 }}>
-          Each project row opens <strong>all surveyed structures</strong> for that project. Excel/Report Preview includes every
-          structure.
+          {view === "structures"
+            ? "One row per surveyed structure. Click a row to see its answers and photos."
+            : "Each project row opens all surveyed structures for that project."}{" "}
+          Excel/Report Preview includes every structure in the project.
         </p>
         <div className="toolbar">
           <div style={{ position: "relative", flex: 1 }}>
@@ -481,6 +503,54 @@ export function Records() {
             />
           ))}
         </div>
+        {view === "structures" && (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Project</th>
+                  <th>Chainage</th>
+                  <th>Structure</th>
+                  <th>Surveyor</th>
+                  <th>Captured</th>
+                  <th>Status</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...filtered]
+                  .sort((a, b) => Date.parse(b.captured_at || b.created_at || "") - Date.parse(a.captured_at || a.created_at || ""))
+                  .map((r) => (
+                    <tr key={r.id} onClick={() => openDetails(r)} style={{ cursor: "pointer" }}>
+                      <td>{r.project_name || "—"}</td>
+                      <td className="mono">{r.chainage || "—"}</td>
+                      <td>{(r.structure_category || "—").replace(/_/g, " ")}</td>
+                      <td>{r.head_surveyor_name || "—"}</td>
+                      <td>{fmt(r.captured_at)}</td>
+                      <td>
+                        <StatusBadge status={r.status} />
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="link-btn preview-link"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openDetails(r);
+                          }}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+            {!filtered.length && <div className="empty">No survey records match these filters.</div>}
+          </div>
+        )}
+
+        {view === "projects" && (
         <div className="table-wrap">
           <table className="table">
             <thead>
@@ -559,6 +629,7 @@ export function Records() {
           </table>
           {!projectRows.length && <div className="empty">No survey records match these filters.</div>}
         </div>
+        )}
       </GlassPanel>
 
       <PreviewModal
