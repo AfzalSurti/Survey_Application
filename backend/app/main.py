@@ -79,15 +79,22 @@ def create_app() -> FastAPI:
 
         from app.services.cloudinary_store import _ensure_configured
 
+        import os
+
         info: dict = {"configured": bool(_ensure_configured())}
         try:
             import cloudinary  # noqa: F401
             import cloudinary.uploader
 
             cfg_now = cloudinary.config()
+            secret = cfg_now.api_secret or ""
             info["cloud_name"] = cfg_now.cloud_name or None
-            info["has_api_key"] = bool(cfg_now.api_key)
-            info["has_api_secret"] = bool(cfg_now.api_secret)
+            info["api_key"] = cfg_now.api_key or None  # not secret — appears in every Cloudinary URL
+            info["api_secret_len"] = len(secret)
+            info["api_secret_preview"] = (secret[:2] + "…" + secret[-2:]) if len(secret) >= 4 else "?"
+            info["CLOUDINARY_URL_env_set"] = bool(os.getenv("CLOUDINARY_URL"))
+            info["CLOUDINARY_API_KEY_env"] = os.getenv("CLOUDINARY_API_KEY") or None
+            info["CLOUDINARY_API_SECRET_env_len"] = len((os.getenv("CLOUDINARY_API_SECRET") or ""))
             # 1x1 transparent PNG
             png = bytes.fromhex(
                 "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
