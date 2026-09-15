@@ -181,7 +181,14 @@ export function Button({
         },
       ]}
     >
-      {loading ? <ActivityIndicator color={palette.text} /> : <Text style={[styles.buttonText, { color: palette.text }]}>{title}</Text>}
+      {loading ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <ActivityIndicator color={palette.text} />
+          <Text style={[styles.buttonText, { color: palette.text }]}>{title}</Text>
+        </View>
+      ) : (
+        <Text style={[styles.buttonText, { color: palette.text }]}>{title}</Text>
+      )}
     </Pressable>
   );
 }

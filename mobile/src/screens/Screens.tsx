@@ -393,6 +393,8 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
   const [photoSessionOpen, setPhotoSessionOpen] = useState(false);
   const [coords, setCoords] = useState<Location.LocationObjectCoords | null>(null);
   const [gpsStatus, setGpsStatus] = useState("Locating…");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitLabel, setSubmitLabel] = useState("Submit survey");
 
   useEffect(() => {
     let cancelled = false;
@@ -507,12 +509,26 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
     if (!record.chainage) {
       return reasonAlert("Chainage required", "Enter chainage before submitting this structure.");
     }
-    await saveRecord(record);
-    for (const uri of photos) await addPhoto(record.id, uri);
 
-    const net = await NetInfo.fetch();
-    if (net.isConnected) {
-      const result = await syncPending();
+    setSubmitting(true);
+    setSubmitLabel("Saving…");
+    try {
+      await saveRecord(record);
+      for (const uri of photos) await addPhoto(record.id, uri);
+
+      const net = await NetInfo.fetch();
+      if (!net.isConnected) {
+        Alert.alert(
+          "Saved offline",
+          "No network right now. This survey will upload automatically when the device is online.",
+          [{ text: "Done", onPress: () => navigation.navigate("Main") }],
+        );
+        return;
+      }
+
+      setSubmitLabel("Connecting…");
+      const result = await syncPending((p) => setSubmitLabel(p.label || "Uploading…"));
+
       if (result.error && result.synced === 0) {
         if (result.authFailed) {
           Alert.alert(
@@ -530,20 +546,16 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
         return;
       }
       Alert.alert(
-        "Survey submitted",
+        "✓ Submitted",
         result.error
-          ? `Synced with warnings: ${result.error}`
-          : "This structure is on the server. Admins and Super Admins can see it now.",
+          ? `Saved to the server with warnings: ${result.error}`
+          : "This structure and its photos are saved on the server. Admins and Super Admins can see it now.",
         [{ text: "Done", onPress: () => navigation.navigate("Main") }],
       );
-      return;
+    } finally {
+      setSubmitting(false);
+      setSubmitLabel("Submit survey");
     }
-
-    Alert.alert(
-      "Saved offline",
-      "No network right now. This survey will upload automatically when the device is online.",
-      [{ text: "Done", onPress: () => navigation.navigate("Main") }],
-    );
   };
 
   const renderQuestion = (q: Question) => {
@@ -657,10 +669,11 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
         {loadState === "error" ? <Text style={[styles.error, { color: theme.danger }]}>{loadError}</Text> : null}
         {loadState === "ready" ? schema.questions.map(renderQuestion) : null}
         <Button
-          title="Submit survey"
+          title={submitting ? submitLabel : "Submit survey"}
           onPress={submit}
-          disabled={loadState !== "ready"}
-          disabledReason={loadError || "Wait until the questionnaire finishes loading."}
+          loading={submitting}
+          disabled={loadState !== "ready" || submitting}
+          disabledReason={submitting ? "Already submitting — please wait." : loadError || "Wait until the questionnaire finishes loading."}
         />
       </GlassCard>
       <PhotoCaptureSession
@@ -869,11 +882,11 @@ export function SyncScreen(_: TabProps<"Sync">) {
   const run = async () => {
     setBusy(true);
     setMessage("Syncing…");
-    const result = await syncPending();
-    setMessage(result.error ?? `${result.synced} record(s) synced successfully.`);
+    const result = await syncPending((p) => setMessage(p.label ? `${p.label} (${p.done}/${p.total})` : "Syncing…"));
+    setMessage(result.error ?? `✓ ${result.synced} record(s) synced successfully.`);
     await refresh();
     setBusy(false);
-    if (result.error) reasonAlert("Sync failed", result.error);
+    if (result.error && !result.synced) reasonAlert("Sync failed", result.error);
   };
 
   return (

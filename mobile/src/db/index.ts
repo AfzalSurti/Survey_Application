@@ -1,6 +1,9 @@
+import * as FileSystem from "expo-file-system";
 import * as SQLite from "expo-sqlite";
 import { newId } from "@/lib/id";
 import { SurveyRecord } from "@/types";
+
+const PHOTOS_DIR = `${FileSystem.documentDirectory ?? ""}survey-photos/`;
 
 let db: SQLite.SQLiteDatabase;
 export async function initDb() {
@@ -121,14 +124,33 @@ export async function saveRecord(record: SurveyRecord & { projectId?: string }) 
   );
 }
 
+/**
+ * Camera-app / picker URIs often live in a cache directory the OS (or the
+ * launched camera app) can purge before a delayed sync gets to them — that
+ * silently drops photos with no error. Copy into the app's own document
+ * directory immediately so the file survives until it's actually uploaded.
+ */
+async function persistPhoto(uri: string): Promise<string> {
+  try {
+    const dirInfo = await FileSystem.getInfoAsync(PHOTOS_DIR);
+    if (!dirInfo.exists) await FileSystem.makeDirectoryAsync(PHOTOS_DIR, { intermediates: true });
+    const dest = `${PHOTOS_DIR}${newId()}.jpg`;
+    await FileSystem.copyAsync({ from: uri, to: dest });
+    return dest;
+  } catch {
+    return uri; // best effort — keep the original reference rather than losing the photo
+  }
+}
+
 export async function addPhoto(recordId: string, uri: string) {
   const d = await database();
+  const localUri = await persistPhoto(uri);
   await d.runAsync(
     "INSERT INTO survey_photos VALUES (?, ?, ?, ?, 'pending', ?)",
     newId(),
     recordId,
-    uri.split("/").pop() ?? "photo.jpg",
-    uri,
+    localUri.split("/").pop() ?? "photo.jpg",
+    localUri,
     new Date().toISOString(),
   );
 }
@@ -181,11 +203,10 @@ export async function markSynced(id: string) {
   await (await database()).runAsync("UPDATE survey_records SET sync_status='synced' WHERE id=?", id);
 }
 
-export async function markPhotosSynced(id: string) {
-  await (await database()).runAsync(
-    "UPDATE survey_photos SET sync_status='synced' WHERE survey_record_id=?",
-    id,
-  );
+/** Mark a single photo synced — lets a partial upload (some photos failed)
+ *  retry only the ones that didn't make it, instead of re-sending everything. */
+export async function markPhotoSynced(photoId: string) {
+  await (await database()).runAsync("UPDATE survey_photos SET sync_status='synced' WHERE id=?", photoId);
 }
 
 export async function cachedSchema(module: string) {
