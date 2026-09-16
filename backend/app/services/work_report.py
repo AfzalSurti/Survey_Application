@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from io import BytesIO
@@ -101,34 +102,53 @@ def _is_remote_photo(url: str | None) -> bool:
     return bool(url) and url.startswith("http") and "stub-" not in url and "drive.google.com" not in url
 
 
-async def collect_photo_blobs(records: list[SurveyRecord]) -> PhotoBlobs:
-    """Resolve every structure's photos to raw image bytes.
+def _report_size_variant(url: str) -> str:
+    """Ask Cloudinary for a resized copy instead of the full camera original.
 
-    Prefers the local file (still on disk this deploy); otherwise downloads the
-    Cloudinary copy. Photos captured before cloud storage — gone from disk with
-    only a stub id — are skipped.
+    Reports/exports only ever display these at a few centimetres — downloading
+    (and, for Excel, embedding) the untouched multi-megabyte camera photo was
+    making a 20-structure export take over a minute and balloon to 16+ MB.
     """
-    out: PhotoBlobs = {}
+    if "res.cloudinary.com" in url and "/upload/" in url:
+        return url.replace("/upload/", "/upload/w_700,q_auto,f_auto/", 1)
+    return url
+
+
+async def _fetch_one_photo(http: httpx.AsyncClient, photo: SurveyPhoto) -> bytes | None:
+    local = Path(photo.local_path) if photo.local_path else None
+    if local and local.is_file():
+        try:
+            return local.read_bytes()
+        except OSError:
+            pass
+    if _is_remote_photo(photo.drive_url):
+        try:
+            resp = await http.get(_report_size_variant(photo.drive_url))
+            if resp.status_code == 200 and resp.content:
+                return resp.content
+        except httpx.HTTPError:
+            logger.warning("Could not fetch report photo %s", photo.id)
+    return None
+
+
+async def collect_photo_blobs(records: list[SurveyRecord]) -> PhotoBlobs:
+    """Resolve every structure's photos to raw image bytes, all in parallel.
+
+    Prefers the local file (still on disk this deploy); otherwise downloads a
+    resized Cloudinary copy. Photos captured before cloud storage — gone from
+    disk with only a stub id — are skipped.
+    """
+    photo_lists = [list(getattr(record, "photos", []) or []) for record in records]
     async with httpx.AsyncClient(timeout=20, follow_redirects=True) as http:
-        for record in records:
-            blobs: list[bytes] = []
-            for photo in list(getattr(record, "photos", []) or []):
-                local = Path(photo.local_path) if photo.local_path else None
-                if local and local.is_file():
-                    try:
-                        blobs.append(local.read_bytes())
-                        continue
-                    except OSError:
-                        pass
-                if _is_remote_photo(photo.drive_url):
-                    try:
-                        resp = await http.get(photo.drive_url)
-                        if resp.status_code == 200 and resp.content:
-                            blobs.append(resp.content)
-                    except httpx.HTTPError:
-                        logger.warning("Could not fetch report photo %s", photo.id)
-            out[record.id] = blobs
-    return out
+        fetch_jobs = [
+            asyncio.gather(*(_fetch_one_photo(http, photo) for photo in photos))
+            for photos in photo_lists
+        ]
+        results = await asyncio.gather(*fetch_jobs)
+    return {
+        record.id: [blob for blob in blobs if blob is not None]
+        for record, blobs in zip(records, results)
+    }
 
 
 def _add_photo_pages(document: Document, project_name: str, structure_index: int, photos: list[bytes]) -> None:
