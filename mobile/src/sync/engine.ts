@@ -3,12 +3,16 @@ import { api, ensureAuth, isAuthErrorMessage } from "@/api/client";
 import { markPhotoSynced, markSynced, pendingPhotos, pendingSync, setServerId } from "@/db";
 
 type SyncRecordResponse = { id: string; sheets_row_id?: string | null; created?: boolean };
-export type SyncProgress = { total: number; done: number; label: string };
 type SyncResult = { synced: number; error?: string; authFailed?: boolean };
+
+export type SyncItemStatus = "queued" | "uploading" | "synced" | "error";
+export type SyncItem = { id: string; label: string; status: SyncItemStatus; detail?: string };
+/** Full live snapshot — every record's current state, not just one line of text. */
+export type SyncSnapshot = { items: SyncItem[]; synced: number; total: number };
 
 let syncInFlight: Promise<SyncResult> | null = null;
 
-export async function syncPending(onProgress?: (p: SyncProgress) => void): Promise<SyncResult> {
+export async function syncPending(onProgress?: (s: SyncSnapshot) => void): Promise<SyncResult> {
   if (syncInFlight) return syncInFlight;
   syncInFlight = (async () => {
     if (!(await NetInfo.fetch()).isConnected) {
@@ -24,24 +28,30 @@ export async function syncPending(onProgress?: (p: SyncProgress) => void): Promi
       };
     }
 
+    const pending = await pendingSync();
     let synced = 0;
     const errors: string[] = [];
     let authFailed = false;
-    const pending = await pendingSync();
-    const total = pending.length;
+
+    const items: SyncItem[] = pending.map((r) => ({
+      id: r.id,
+      label: r.chainage || r.category || r.id,
+      status: "queued",
+    }));
+    const emit = () => onProgress?.({ items: items.map((it) => ({ ...it })), synced, total: items.length });
+    emit();
 
     for (let i = 0; i < pending.length; i++) {
       const record = pending[i];
-      const label = record.chainage || record.category || record.id;
-      onProgress?.({ total, done: i, label: `Uploading ${label}…` });
+      const baseLabel = record.chainage || record.category || record.id;
+      items[i].status = "uploading";
+      emit();
       try {
         if (!record.project_id) {
-          errors.push(`${label}: missing project — complete Structure Brief first.`);
-          continue;
+          throw new Error("missing project — complete Structure Brief first.");
         }
         if (!record.chainage?.trim()) {
-          errors.push(`${record.id}: chainage is required before sync.`);
-          continue;
+          throw new Error("chainage is required before sync.");
         }
         const responses = JSON.parse(record.responses_json);
         const { data: result } = await api.post<SyncRecordResponse>("/api/sync/survey-records", {
@@ -64,7 +74,8 @@ export async function syncPending(onProgress?: (p: SyncProgress) => void): Promi
         let photoFailures = 0;
         for (let p = 0; p < photos.length; p++) {
           const photo = photos[p];
-          onProgress?.({ total, done: i, label: `${label}: photo ${p + 1}/${photos.length}…` });
+          items[i].label = `${baseLabel} — photo ${p + 1}/${photos.length}`;
+          emit();
           try {
             const form = new FormData();
             form.append("survey_record_id", serverId);
@@ -81,25 +92,31 @@ export async function syncPending(onProgress?: (p: SyncProgress) => void): Promi
             photoFailures += 1;
             const msg = photoErr instanceof Error ? photoErr.message : "Photo upload failed";
             if (isAuthErrorMessage(msg)) authFailed = true;
-            errors.push(`${label} photo ${p + 1}/${photos.length}: ${msg}`);
+            errors.push(`${baseLabel} photo ${p + 1}/${photos.length}: ${msg}`);
           }
         }
+        items[i].label = baseLabel;
 
         if (photoFailures === 0) {
           await markSynced(record.id);
           synced += 1;
+          items[i].status = "synced";
         } else {
           // Record is safely on the server; leave it "pending" so only the
           // failed photo(s) are retried on the next sync.
-          errors.push(`${label}: saved, but ${photoFailures} photo(s) still pending upload — will retry automatically.`);
+          items[i].status = "error";
+          items[i].detail = `saved, but ${photoFailures} photo(s) still pending — will retry`;
+          errors.push(`${baseLabel}: saved, but ${photoFailures} photo(s) still pending upload — will retry automatically.`);
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Sync failed";
         if (isAuthErrorMessage(msg)) authFailed = true;
-        errors.push(`${label}: ${msg}`);
+        items[i].status = "error";
+        items[i].detail = msg;
+        errors.push(`${baseLabel}: ${msg}`);
       }
+      emit();
     }
-    onProgress?.({ total, done: total, label: "" });
 
     if (errors.length) {
       return {

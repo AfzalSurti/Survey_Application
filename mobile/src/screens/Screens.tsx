@@ -45,7 +45,7 @@ import {
 import { newId } from "@/lib/id";
 import { wakeServer } from "@/lib/wakeServer";
 import { FormSchema, Question, QuestionType, SurveyRecord } from "@/types";
-import { syncPending } from "@/sync/engine";
+import { syncPending, type SyncSnapshot } from "@/sync/engine";
 
 export type RootStack = {
   Login: undefined;
@@ -527,7 +527,10 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       }
 
       setSubmitLabel("Connecting…");
-      const result = await syncPending((p) => setSubmitLabel(p.label || "Uploading…"));
+      const result = await syncPending((snapshot) => {
+        const active = snapshot.items.find((it) => it.status === "uploading");
+        setSubmitLabel(active ? active.label : `Uploading… (${snapshot.synced}/${snapshot.total})`);
+      });
 
       if (result.error && result.synced === 0) {
         if (result.authFailed) {
@@ -878,6 +881,7 @@ export function SyncScreen(_: TabProps<"Sync">) {
   const [message, setMessage] = useState("Ready to sync pending records to the cloud.");
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [snapshot, setSnapshot] = useState<SyncSnapshot | null>(null);
 
   const refresh = useCallback(async () => {
     const counts = await dashboardCounts();
@@ -890,13 +894,19 @@ export function SyncScreen(_: TabProps<"Sync">) {
 
   const run = async () => {
     setBusy(true);
-    setMessage("Syncing…");
-    const result = await syncPending((p) => setMessage(p.label ? `${p.label} (${p.done}/${p.total})` : "Syncing…"));
+    setSnapshot(null);
+    setMessage("Connecting…");
+    const result = await syncPending((s) => {
+      setSnapshot(s);
+      setMessage(`Syncing ${s.synced}/${s.total} done…`);
+    });
     setMessage(result.error ?? `✓ ${result.synced} record(s) synced successfully.`);
     await refresh();
     setBusy(false);
     if (result.error && !result.synced) reasonAlert("Sync failed", result.error);
   };
+
+  const progressPct = snapshot?.total ? Math.round((snapshot.synced / snapshot.total) * 100) : 0;
 
   return (
     <Screen>
@@ -906,8 +916,38 @@ export function SyncScreen(_: TabProps<"Sync">) {
           <Text style={[styles.number, { color: theme.accentSecondary, fontSize: 28 }]}>{pending}</Text>
           <Text style={{ color: theme.ink, fontWeight: "700" }}>Pending records</Text>
         </View>
-        <Meta>{message}</Meta>
+
+        {busy && snapshot ? (
+          <>
+            <View style={[styles.progressTrack, { backgroundColor: "rgba(111,168,62,.18)", marginBottom: 6 }]}>
+              <View style={[styles.progressFill, { width: `${progressPct}%`, backgroundColor: theme.accentSecondary }]} />
+            </View>
+            <Meta>
+              {snapshot.synced}/{snapshot.total} uploaded — {progressPct}%
+            </Meta>
+          </>
+        ) : (
+          <Meta>{message}</Meta>
+        )}
+
         <Button title={busy ? "Syncing…" : "Sync now"} onPress={run} loading={busy} disabled={busy} disabledReason="Sync is already running." />
+
+        {snapshot && snapshot.items.length > 0 ? (
+          <View style={{ marginTop: 14, gap: 8 }}>
+            {snapshot.items.map((item) => (
+              <View
+                key={item.id}
+                style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+              >
+                <Text style={{ color: theme.ink, flex: 1 }} numberOfLines={1}>
+                  {item.status === "uploading" ? "↻ " : item.status === "synced" ? "✓ " : item.status === "error" ? "✗ " : "• "}
+                  {item.label}
+                </Text>
+                <StatusChip status={item.status} />
+              </View>
+            ))}
+          </View>
+        ) : null}
       </GlassCard>
     </Screen>
   );
