@@ -3,8 +3,16 @@ name: Keep API warm
 # Render's free plan puts the API to sleep after ~15 min of no traffic, and the
 # next request then pays a 30-60s cold start. For field surveyors that shows up
 # as "Submit survey does nothing for a minute" and very slow first syncs.
-# This pings the health endpoint on a schedule so the instance stays awake
-# through Indian field hours (07:30-23:40 IST ≈ 02:00-18:10 UTC).
+#
+# Pinging /api/health alone is NOT enough: it never touches the database, so
+# it keeps the web server awake but Neon's free-tier Postgres can still
+# auto-suspend on its own idle timer regardless. The first request to reach a
+# suspended database can fail mid-request with
+# "InterfaceError: the underlying connection is closed" while Neon wakes back
+# up — which looked like a random sync bug but was really this. Ping
+# /api/health/ready instead — it runs a real query, keeping both the server
+# AND the database warm — through Indian field hours (07:30-23:40 IST ≈
+# 02:00-18:10 UTC).
 
 on:
   schedule:
@@ -15,14 +23,13 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping /api/health
+      - name: Ping /api/health/ready (touches the DB, unlike /api/health)
         run: |
           for i in 1 2 3 4 5; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 \
-              https://survey-application-4r6q.onrender.com/api/health || true)
-            echo "attempt $i -> HTTP $code"
-            if [ "$code" = "200" ]; then exit 0; fi
+            body=$(curl -s --max-time 90 https://survey-application-4r6q.onrender.com/api/health/ready || true)
+            echo "attempt $i -> $body"
+            if echo "$body" | grep -q '"database":"ok"'; then exit 0; fi
             sleep 15
           done
-          echo "health check never returned 200"
+          echo "database never reported ok"
           exit 1
