@@ -76,7 +76,12 @@ export function RootNavigator() {
       const token = await SecureStore.getItemAsync("access_token");
       if (!cancelled) setInitial(token ? "Main" : "Login");
       setShowWake(true);
+      // This gate never blocks on the result (the app is offline-first and
+      // usable either way) — cap it so a bad connection can't hold the
+      // launch screen hostage. Real network calls later have their own
+      // handling and will retry.
       await wakeServer({
+        maxMs: 20_000,
         onSlow: () => {
           if (!cancelled) setShowWake(true);
         },

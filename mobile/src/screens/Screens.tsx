@@ -125,7 +125,7 @@ export function LoginScreen({ navigation }: StackProps<"Login">) {
     try {
       setLoading(true);
       const slow = setTimeout(() => setWaking(true), 800);
-      await wakeServer({ onSlow: () => setWaking(true) });
+      await wakeServer({ maxMs: 45_000, onSlow: () => setWaking(true) });
       clearTimeout(slow);
       await login(email.trim(), password);
       setWaking(false);
