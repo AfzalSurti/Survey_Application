@@ -155,6 +155,14 @@ export async function addPhoto(recordId: string, uri: string) {
   );
 }
 
+/** Discard a record that can never sync (e.g. saved with no project attached)
+ *  so it stops failing every sync attempt. Local-only — nothing to undo. */
+export async function deleteLocalRecord(id: string) {
+  const d = await database();
+  await d.runAsync("DELETE FROM survey_photos WHERE survey_record_id=?", id);
+  await d.runAsync("DELETE FROM survey_records WHERE id=?", id);
+}
+
 export async function records() {
   return (await database()).getAllAsync<SurveyRecord & { responses_json: string }>(
     "SELECT * FROM survey_records ORDER BY created_at DESC",

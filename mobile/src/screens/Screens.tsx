@@ -17,7 +17,17 @@ import { CommonActions } from "@react-navigation/native";
 import { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { api, login, logout } from "@/api/client";
-import { addPhoto, cacheSchema, cachedSchema, dashboardCounts, getPreSurvey, records, savePreSurvey, saveRecord } from "@/db";
+import {
+  addPhoto,
+  cacheSchema,
+  cachedSchema,
+  dashboardCounts,
+  deleteLocalRecord,
+  getPreSurvey,
+  records,
+  savePreSurvey,
+  saveRecord,
+} from "@/db";
 import {
   Body,
   Button,
@@ -323,21 +333,110 @@ export function StructureBriefScreen({ navigation }: StackProps<"StructureBrief"
 }
 
 export function UtilityBriefScreen({ navigation }: StackProps<"UtilityBrief">) {
+  const { theme } = useTheme();
+  const [projects, setProjects] = useState<{ id: string; name: string; project_number: string; highway_number: string }[]>([]);
+  const [projectId, setProjectId] = useState("");
+  const [values, setValues] = useState({ headSurveyor: "", organization: "GDRPL" });
+  const [loadingProjects, setLoadingProjects] = useState(true);
+
+  // This screen used to jump straight to the form with no project attached
+  // at all — every utility survey saved that way had no way to sync, ever
+  // ("missing project — complete Structure Brief first", even though this
+  // isn't that screen). Mirrors StructureBriefScreen's project step exactly.
+  useEffect(() => {
+    (async () => {
+      const saved = await getPreSurvey();
+      if (saved) {
+        setValues({ headSurveyor: saved.head_surveyor || "", organization: saved.organization || "GDRPL" });
+        if (saved.project_id) setProjectId(saved.project_id);
+      }
+      try {
+        const { data } = await api.get("/api/projects");
+        setProjects(data);
+        if (!projectId && data[0]) setProjectId(data[0].id);
+      } catch {
+        reasonAlert("Projects unavailable", "Could not load assigned projects. Connect once so your assignments sync, then try again.");
+      } finally {
+        setLoadingProjects(false);
+      }
+    })();
+  }, []);
+
+  const selected = projects.find((p) => p.id === projectId);
+
+  const start = async () => {
+    if (loadingProjects) return reasonAlert("Please wait", "Assigned projects are still loading.");
+    if (!projects.length) {
+      return reasonAlert(
+        "No assigned project",
+        "Super admin has not assigned any project to your account yet. Contact your admin, then try again.",
+      );
+    }
+    if (!projectId || !selected) return reasonAlert("Project required", "Select one assigned project before starting the form.");
+    if (!values.headSurveyor.trim()) return reasonAlert("Head surveyor required", "Enter the name of the head surveyor to continue.");
+    if (!values.organization.trim()) return reasonAlert("Organization required", "Enter the organization name to continue.");
+    await savePreSurvey({
+      headSurveyor: values.headSurveyor.trim(),
+      organization: values.organization.trim(),
+      projectId: selected.id,
+      projectName: selected.name,
+      projectNumber: selected.project_number,
+      highwayNumber: selected.highway_number,
+    });
+    try {
+      await api.post("/api/pre-survey", {
+        project_id: selected.id,
+        head_surveyor_name: values.headSurveyor.trim(),
+        organization: values.organization.trim(),
+      });
+    } catch {
+      /* offline ok — saved locally */
+    }
+    navigation.navigate("DynamicForm", {
+      module: "utility_shifting",
+      category: "utility_identification",
+      categoryLabel: "Utility Identification",
+    });
+  };
+
   return (
-    <Screen onBack={() => navigation.goBack()}>
+    <Screen onBack={() => navigation.goBack()} keyboard>
       <GlassCard>
         <Hero>Utility Survey</Hero>
         <SectionTitle>Description</SectionTitle>
         <Body>{UTILITY_SURVEY_DESCRIPTION}</Body>
+      </GlassCard>
+      <GlassCard>
+        <SectionTitle>Pre-survey (once per session)</SectionTitle>
+        <Meta>Only projects assigned by super admin appear here.</Meta>
+        <Label>Project</Label>
+        {loadingProjects ? <ActivityIndicator color={theme.accentPrimary} style={{ marginVertical: 12 }} /> : null}
+        <View style={styles.options}>
+          {projects.map((p) => (
+            <ChoicePill key={p.id} label={`${p.name} (${p.project_number})`} selected={projectId === p.id} onPress={() => setProjectId(p.id)} />
+          ))}
+        </View>
+        {!projects.length && !loadingProjects ? (
+          <EmptyState title="No projects assigned" message="Ask your super admin to assign a project to this field account." />
+        ) : null}
+        <Label>Name of the Head Surveyor</Label>
+        <Field value={values.headSurveyor} onChangeText={(v) => setValues((s) => ({ ...s, headSurveyor: v }))} placeholder="Head surveyor name" />
+        <Label>Organization</Label>
+        <Field value={values.organization} onChangeText={(v) => setValues((s) => ({ ...s, organization: v }))} />
+        {selected ? (
+          <View style={[styles.infoBox, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+            <Meta>
+              Project: {selected.name}{"\n"}
+              Number: {selected.project_number}{"\n"}
+              Highway: {selected.highway_number}
+            </Meta>
+          </View>
+        ) : null}
         <Button
           title="Start utility form"
-          onPress={() =>
-            navigation.navigate("DynamicForm", {
-              module: "utility_shifting",
-              category: "utility_identification",
-              categoryLabel: "Utility Identification",
-            })
-          }
+          onPress={start}
+          disabled={loadingProjects}
+          disabledReason="Assigned projects are still loading. Wait a moment, then try again."
         />
       </GlassCard>
     </Screen>
@@ -866,8 +965,31 @@ export function SurveyListScreen(_: TabProps<"Surveys">) {
             <Text style={{ color: theme.cardText, marginTop: 4 }}>
               Chainage {item.chainage || "—"} · {item.status}
             </Text>
-            <View style={{ marginTop: 8 }}>
+            <View style={{ marginTop: 8, flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
               <StatusChip status={item.syncStatus} />
+              {item.syncStatus !== "synced" ? (
+                <Pressable
+                  onPress={() =>
+                    Alert.alert(
+                      "Discard this record?",
+                      "It has never synced and will be permanently removed from this phone. Use this only for records stuck on a sync error you can't fix (e.g. no project attached).",
+                      [
+                        { text: "Keep", style: "cancel" },
+                        {
+                          text: "Discard",
+                          style: "destructive",
+                          onPress: async () => {
+                            await deleteLocalRecord(item.id);
+                            setList(await records());
+                          },
+                        },
+                      ],
+                    )
+                  }
+                >
+                  <Text style={{ color: theme.danger, fontWeight: "700", fontSize: 12 }}>Discard</Text>
+                </Pressable>
+              ) : null}
             </View>
           </GlassCard>
         )}
