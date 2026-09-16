@@ -1,11 +1,15 @@
+import logging
 from collections.abc import AsyncGenerator
 from uuid import uuid4
 
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 settings = get_settings()
@@ -38,10 +42,22 @@ class Base(DeclarativeBase):
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """
+    On a flaky client connection (weak mobile signal), the request can outlive
+    the underlying asyncpg connection — it dies between the endpoint finishing
+    and this commit running, which raises even though the endpoint's own logic
+    completed. When that happens the write was never durably saved, so the
+    client correctly sees a failure and retries; the only bug worth fixing
+    here is that trying to rollback an already-dead connection used to throw
+    a second, uncaught error that buried the real one in the logs.
+    """
     async with AsyncSessionLocal() as session:
         try:
             yield session
             await session.commit()
         except Exception:
-            await session.rollback()
+            try:
+                await session.rollback()
+            except DBAPIError:
+                logger.warning("Rollback skipped — connection already closed (client likely disconnected)")
             raise
