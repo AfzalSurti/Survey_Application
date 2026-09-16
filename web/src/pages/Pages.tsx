@@ -674,7 +674,8 @@ export function Records() {
       />
 
       {selected && (
-        <aside className="glass drawer">
+        <div className="drawer-backdrop" role="presentation" onClick={() => setSelected(null)}>
+        <aside className="glass drawer" onClick={(e) => e.stopPropagation()}>
           <button className="drawer-close" onClick={() => setSelected(null)}>
             <X />
           </button>
@@ -752,6 +753,7 @@ export function Records() {
             </pre>
           ) : null}
         </aside>
+        </div>
       )}
     </>
   );
