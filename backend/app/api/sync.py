@@ -206,6 +206,8 @@ async def sync_photo(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Record belongs to another surveyor")
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Photo filename is required")
+    project_id = record.project_id
+    record_id = record.id
 
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     safe_name = Path(file.filename).name
@@ -215,9 +217,7 @@ async def sync_photo(
     try:
         # Durable storage first: Cloudinary CDN. Falls back to Google Drive, then
         # to a stub id — sync must never fail because image hosting is down.
-        cloud_id, cloud_url = await upload_image(
-            local_path, folder=f"gdrpl-survey/{record.project_id}"
-        )
+        cloud_id, cloud_url = await upload_image(local_path, folder=f"gdrpl-survey/{project_id}")
         if cloud_url:
             drive_file_id, drive_url = f"cloudinary:{cloud_id}", cloud_url
         else:
@@ -226,15 +226,22 @@ async def sync_photo(
     finally:
         await file.close()
 
-    photo = SurveyPhoto(
-        survey_record_id=record.id,
-        file_name=safe_name,
-        local_path=str(local_path),
-        drive_file_id=drive_file_id,
-        drive_url=drive_url,
-        sync_status=SyncStatus.synced,
-    )
-    db.add(photo)
-    await db.flush()
-    await db.refresh(photo)
-    return photo
+    # Open a FRESH session for the actual write. The record lookup above plus
+    # the disk write + Cloudinary upload can take many seconds on weak field
+    # signal; holding db's connection idle across all of that is what let it
+    # go stale under Neon's pooler and made the final commit fail with
+    # "the underlying connection is closed". A short-lived session opened
+    # right before the write has nothing to go stale.
+    async with AsyncSessionLocal() as write_session:
+        photo = SurveyPhoto(
+            survey_record_id=record_id,
+            file_name=safe_name,
+            local_path=str(local_path),
+            drive_file_id=drive_file_id,
+            drive_url=drive_url,
+            sync_status=SyncStatus.synced,
+        )
+        write_session.add(photo)
+        await write_session.commit()
+        await write_session.refresh(photo)
+        return photo
