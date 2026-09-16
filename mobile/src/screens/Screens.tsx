@@ -552,6 +552,15 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
           : "This structure and its photos are saved on the server. Admins and Super Admins can see it now.",
         [{ text: "Done", onPress: () => navigation.navigate("Main") }],
       );
+    } catch (e) {
+      // Never fail silently: saveRecord()/addPhoto() itself throwing (bad DB
+      // state, disk full, etc.) used to leave the button stuck on its last
+      // progress label with no explanation. Surface exactly what broke.
+      const msg = e instanceof Error ? e.message : String(e);
+      Alert.alert(
+        "Could not complete submit",
+        `${msg}\n\nThe form's answers are not lost — check the Surveys tab, or try Submit again.`,
+      );
     } finally {
       setSubmitting(false);
       setSubmitLabel("Submit survey");
