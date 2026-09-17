@@ -24,7 +24,7 @@ from app.services.work_report import collect_photo_blobs
 router = APIRouter(prefix="/api/exports", tags=["exports"])
 
 # Already surfaced as their own columns — don't repeat them as question columns.
-_SKIP_RESPONSE_KEYS = {"gps", "capturedAt", "structure_category", "photos"}
+_SKIP_RESPONSE_KEYS = {"gps", "capturedAt", "structure_category", "photos", "chainage"}
 _PHOTO_COLUMNS = 4  # matches the field app's minimum photo count
 
 
