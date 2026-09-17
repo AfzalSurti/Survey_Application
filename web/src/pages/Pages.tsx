@@ -371,6 +371,13 @@ export function Records() {
     }
   };
 
+  /** Header-level Excel/Report access — works no matter which view (grouped or
+   *  flat) is active, covering every currently filtered record. */
+  const openPreviewAll = (mode: "excel" | "word") => {
+    setPreviewRecords(filtered);
+    setPreview(mode);
+  };
+
   const openPreview = async (mode: "excel" | "word", r: RecordItem) => {
     setBusy(true);
     try {
@@ -458,12 +465,19 @@ export function Records() {
         eyebrow="Review workspace"
         title="Survey records"
         action={
-          <span className="muted" style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+          <span className="muted" style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             {projectRows.length} project(s) · {filtered.length} structure(s)
             {recordsLoading && records.length ? " · refreshing…" : ""}
             {recordsError && !records.length ? " · offline, retrying…" : ""}
             <button type="button" className="link-btn" onClick={() => refreshRecords()}>
               Refresh
+            </button>
+            <span className="muted">·</span>
+            <button type="button" className="link-btn" onClick={() => openPreviewAll("excel")} disabled={!filtered.length}>
+              Preview Excel
+            </button>
+            <button className="button" style={{ padding: "6px 12px", fontSize: ".82rem" }} onClick={downloadExcel} disabled={!filtered.length}>
+              Download Excel
             </button>
           </span>
         }
