@@ -271,6 +271,9 @@ export function Records() {
   const [editChainage, setEditChainage] = useState("");
   const [preview, setPreview] = useState<"excel" | "word" | null>(null);
   const [previewRecords, setPreviewRecords] = useState<RecordItem[]>([]);
+  /** null = export covers every record; set = scoped to just that project,
+   *  matching whichever data is actually being shown in the preview. */
+  const [previewProjectId, setPreviewProjectId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<"projects" | "structures">("structures");
   const [filters, setFilters] = useState({
@@ -375,11 +378,13 @@ export function Records() {
    *  flat) is active, covering every currently filtered record. */
   const openPreviewAll = (mode: "excel" | "word") => {
     setPreviewRecords(filtered);
+    setPreviewProjectId(null);
     setPreview(mode);
   };
 
   const openPreview = async (mode: "excel" | "word", r: RecordItem) => {
     setBusy(true);
+    setPreviewProjectId(r.project_id);
     try {
       const siblings = await fetchRecords(r.project_id);
       setPreviewRecords(siblings.length ? siblings : [r]);
@@ -441,7 +446,8 @@ export function Records() {
   const downloadExcel = async () => {
     setBusy(true);
     try {
-      await client.download("/exports/excel");
+      const qs = previewProjectId ? `?project_id=${encodeURIComponent(previewProjectId)}` : "";
+      await client.download(`/exports/excel${qs}`);
     } catch (e) {
       alert((e as Error).message);
     } finally {
