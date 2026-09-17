@@ -443,10 +443,11 @@ export function Records() {
       alert((e as Error).message || "Could not delete record.");
     }
   };
-  const downloadExcel = async () => {
+  const downloadExcel = async (projectIdOverride?: string | null) => {
     setBusy(true);
     try {
-      const qs = previewProjectId ? `?project_id=${encodeURIComponent(previewProjectId)}` : "";
+      const scopeId = projectIdOverride !== undefined ? projectIdOverride : previewProjectId;
+      const qs = scopeId ? `?project_id=${encodeURIComponent(scopeId)}` : "";
       await client.download(`/exports/excel${qs}`);
     } catch (e) {
       alert((e as Error).message);
@@ -482,7 +483,7 @@ export function Records() {
             <button type="button" className="link-btn" onClick={() => openPreviewAll("excel")} disabled={!filtered.length}>
               Preview Excel
             </button>
-            <button className="button" style={{ padding: "6px 12px", fontSize: ".82rem" }} onClick={downloadExcel} disabled={!filtered.length}>
+            <button className="button" style={{ padding: "6px 12px", fontSize: ".82rem" }} onClick={() => downloadExcel(null)} disabled={!filtered.length}>
               Download Excel
             </button>
           </span>
@@ -712,6 +713,20 @@ export function Records() {
           <div className="kv">
             <span>Structures</span>
             <strong>{projectStructures.length} surveyed</strong>
+          </div>
+          <div style={{ display: "flex", gap: 8, margin: "10px 0 16px" }}>
+            <button type="button" className="link-btn" onClick={() => openPreview("excel", selected)}>
+              Preview Excel
+            </button>
+            <button
+              type="button"
+              className="button"
+              style={{ padding: "6px 12px", fontSize: ".82rem" }}
+              onClick={() => downloadExcel(selected.project_id)}
+              disabled={busy}
+            >
+              Download Excel (this project)
+            </button>
           </div>
 
           <h3 style={{ marginTop: 18 }}>All surveyed structures</h3>
