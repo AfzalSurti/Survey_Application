@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.security import hash_password
 from app.database import AsyncSessionLocal
@@ -19,6 +19,60 @@ from seeds.questionnaire_v1 import (
     UTILITY_SHIFTING_SCHEMA,
     count_questions,
 )
+from seeds.questionnaire_v2 import STRUCTURE_INVENTORY_SCHEMA_V2, validate_v2
+
+
+async def apply_structure_inventory_v2() -> None:
+    """Roll out questionnaire v2 once, without ever overriding an admin.
+
+    Runs in its own session and swallows every error: this file runs in the
+    Render start command (`... && python seeds/seed_data.py && uvicorn ...`), so
+    an exception here would stop the API from booting.
+
+    - Only acts while v1 is the newest version. If v2 (or anything newer) is
+      already stored — e.g. a super admin published from the schema editor —
+      it is left exactly as is, and is never re-activated behind their back.
+    """
+    module = "structure_inventory"
+    try:
+        problems = validate_v2()
+        if problems:
+            print(f"Questionnaire v2 NOT applied — failed validation: {problems}")
+            return
+        async with AsyncSessionLocal() as db:
+            newest = await db.scalar(
+                select(func.max(QuestionnaireSchema.version)).where(QuestionnaireSchema.module == module)
+            )
+            if newest is None:
+                print("Questionnaire v2 skipped — no v1 seeded yet")
+                return
+            if newest >= STRUCTURE_INVENTORY_SCHEMA_V2["version"]:
+                print(f"Questionnaire v2 already present (newest is v{newest}) — skipped")
+                return
+            currently_active = await db.execute(
+                select(QuestionnaireSchema).where(
+                    QuestionnaireSchema.module == module,
+                    QuestionnaireSchema.is_active.is_(True),
+                )
+            )
+            for row in currently_active.scalars():
+                row.is_active = False
+            db.add(
+                QuestionnaireSchema(
+                    id=uuid.uuid4(),
+                    module=module,
+                    version=STRUCTURE_INVENTORY_SCHEMA_V2["version"],
+                    schema_json=STRUCTURE_INVENTORY_SCHEMA_V2,
+                    is_active=True,
+                )
+            )
+            await db.commit()
+            print(
+                f"Seeded {module} v{STRUCTURE_INVENTORY_SCHEMA_V2['version']} as active "
+                f"({count_questions(STRUCTURE_INVENTORY_SCHEMA_V2)} category questions)"
+            )
+    except Exception as exc:  # noqa: BLE001 — must never block API startup
+        print(f"WARNING: questionnaire v2 not applied ({type(exc).__name__}: {exc}); continuing on existing schema")
 
 
 async def seed() -> None:
@@ -113,7 +167,9 @@ async def seed() -> None:
                 print(f"Setting seeded: {key}")
 
         await db.commit()
-        print("Seed complete.")
+
+    await apply_structure_inventory_v2()
+    print("Seed complete.")
 
 
 if __name__ == "__main__":

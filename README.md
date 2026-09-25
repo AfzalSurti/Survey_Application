@@ -55,3 +55,21 @@ Set API base URL in Settings (Android emulator: `http://10.0.2.2:8000`, device: 
 - Settings: `/api/settings`
 
 Logo: `assets/gdrpl-logo.png`
+
+## Questionnaire schema
+Forms are data: each survey module stores versioned JSON (`questionnaire_schemas`), served by `/api/schemas`.
+The seed (`backend/seeds/`) creates v1, then v2 once (never overriding a version a super admin published).
+Edit forms in the web admin → *Questionnaire schema* → **Publish new version**.
+
+Optional keys on a question (older apps ignore them and simply show everything, optional):
+
+| Key | Meaning |
+|---|---|
+| `show_if` | only shown while the condition holds |
+| `required_if` | compulsory while the condition holds (pair with `"required": false`) |
+| `prefill_from` | mirrors another answer until the surveyor edits it ("same as wing wall") |
+| `allow_other` | dropdown also accepts a hand-typed value |
+
+Condition: `{"q": "<id>", "in": [..]}` · `{"q": "<id>", "not_in": [..]}` · `{"any": [..]}` · `{"all": [..]}`
+(`in` matches a dropdown answer, or any selected item of a multi-select).
+
