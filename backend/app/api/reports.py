@@ -16,6 +16,7 @@ from app.services.work_report import (
     build_work_report_docx,
     build_work_report_pdf,
     collect_photo_blobs,
+    load_question_index,
     load_records_for_report,
 )
 
@@ -45,12 +46,25 @@ async def generate_report(
     if user.role == UserRole.surveyor and any(record.surveyor_id != user.id for record in records):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report on another surveyor's records")
 
-    photo_blobs = await collect_photo_blobs(records)
+    if len({record.project_id for record in records}) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A report covers one project at a time — select structures from a single project.",
+        )
+
+    question_index = await load_question_index(db)
+    # The PDF puts two photos across a full page width, so it wants a sharper copy
+    # than the Excel/DOCX thumbnails.
+    photo_blobs = await collect_photo_blobs(records, max_width=1200 if fmt == "pdf" else 700)
     if fmt == "pdf":
-        data = build_work_report_pdf(project_name=project_name, records=records, photo_blobs=photo_blobs)
+        data = build_work_report_pdf(
+            project_name=project_name, records=records, photo_blobs=photo_blobs, question_index=question_index
+        )
         suffix, media_type = ".pdf", "application/pdf"
     else:
-        data = build_work_report_docx(project_name=project_name, records=records, photo_blobs=photo_blobs)
+        data = build_work_report_docx(
+            project_name=project_name, records=records, photo_blobs=photo_blobs, question_index=question_index
+        )
         suffix = ".docx"
         media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
