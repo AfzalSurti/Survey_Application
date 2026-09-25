@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { apiBaseUrl } from "../lib/wakeServer";
 import { client, type RecordItem } from "../api/client";
+import { buildQuestionIndex, categoryTitle, chainageOrder, reportRows, type QuestionIndex, type StoredSchema } from "../lib/reportRows";
 import { ActionButton } from "./UI";
 
 const fmt = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
@@ -15,8 +16,6 @@ const CATEGORY_TABS: { key: string; label: string }[] = [
   { key: "minor_bridge_girder_or_box", label: "Minor Bridge (Box Type)" },
   { key: "grade_separated_structure", label: "Grade Separated Structure" },
 ];
-
-const SKIP_KEYS = new Set(["gps", "capturedAt", "structure_category", "photos"]);
 
 const categoryLabel = (key?: string | null) =>
   CATEGORY_TABS.find((t) => t.key === key)?.label || (key || "Structure").replace(/_/g, " ");
@@ -61,37 +60,22 @@ async function fetchPhotoObjectUrl(photoId: string): Promise<string | null> {
   return URL.createObjectURL(await res.blob());
 }
 
-/** Same Q&A layout as Word report preview (Sr. No / Description / Data). */
-function buildReportRows(r: RecordItem): [string, string][] {
-  const responses = (r.responses_json || {}) as Record<string, unknown>;
-  const gps = responses.gps as { latitude?: number; longitude?: number } | undefined;
-  const lat = gps?.latitude ?? r.latitude;
-  const lon = gps?.longitude ?? r.longitude;
-  const coords = lat != null && lon != null ? `${lat}, ${lon}` : "—";
-
-  const rows: [string, string][] = [
-    ["Name of Road", String(responses.name_of_road ?? r.project_name ?? "—")],
-    [
-      "Location of bridge / structure in Km.",
-      `${r.chainage || "—"} — ${categoryLabel(r.structure_category).toUpperCase()}`,
-    ],
-    ["Coordinates", coords],
-  ];
-
-  for (const [key, value] of Object.entries(responses)) {
-    if (SKIP_KEYS.has(key) || key === "name_of_road") continue;
-    const label = key.replace(/_/g, " ");
-    const data = value == null || value === "" ? "—" : typeof value === "object" ? JSON.stringify(value) : String(value);
-    rows.push([label, data]);
-  }
-  return rows;
-}
-
 /** Excel preview (tabbed) + Work Report preview (Page-1 Q&A + Page-2+ photo grids). */
-export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onDownloadPdf, onDownloadExcel, busy }: Props) {
+export function PreviewModal({ open, mode, records: unsortedRecords, onClose, onDownloadWord, onDownloadPdf, onDownloadExcel, busy }: Props) {
+  const records = useMemo(() => [...unsortedRecords].sort(chainageOrder), [unsortedRecords]);
   const [tab, setTab] = useState("pre_survey");
   const [photoUrls, setPhotoUrls] = useState<Record<string, string[]>>({});
   const [photosLoading, setPhotosLoading] = useState(false);
+  const [questionIndex, setQuestionIndex] = useState<QuestionIndex | undefined>();
+
+  // The report prints the questionnaire's own wording, in questionnaire order.
+  useEffect(() => {
+    if (!open || questionIndex) return;
+    client
+      .get<StoredSchema[]>("/schemas")
+      .then((rows) => setQuestionIndex(buildQuestionIndex(rows)))
+      .catch(() => setQuestionIndex({}));
+  }, [open, questionIndex]);
 
   const filteredByTab = useMemo(() => {
     if (tab === "pre_survey" || tab === "overall") return records;
@@ -232,7 +216,7 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
                     {records.map((r) => (
                       <tr key={r.id}>
                         <td className="mono">{r.chainage || "—"}</td>
-                        <td>{categoryLabel(r.structure_category)}</td>
+                        <td>{categoryTitle(r.structure_category)}</td>
                         <td>{r.status}</td>
                         <td>{r.head_surveyor_name || "—"}</td>
                         <td>{fmt(r.complete_date)}</td>
@@ -243,11 +227,11 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
               ) : (
                 <div className="excel-category-reports">
                   {filteredByTab.map((r, idx) => {
-                    const rows = buildReportRows(r);
+                    const rows = reportRows(r, questionIndex);
                     return (
                       <section key={r.id} className="report-block">
                         <h3>
-                          Table {idx + 1} {categoryLabel(r.structure_category)} at Chainage Km {r.chainage || "—"}
+                          Table {idx + 1} {categoryTitle(r.structure_category)} at Chainage Km {r.chainage || "—"}
                         </h3>
                         <table className="report-table">
                           <thead>
@@ -290,21 +274,23 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
         ) : (
           <>
             <p className="muted">
-              Work report preview — Page-1 Q&amp;A table grows with answers; Page-2+ photo grids expand automatically (4 per
-              page). Download as ready-to-share PDF or editable .docx — photos are pulled from cloud storage.
+              Project report — one table per structure (in chainage order), then its photos, two per page. Download as
+              ready-to-share PDF or editable .docx — photos are pulled from cloud storage.
             </p>
             {photosLoading && <p className="muted">Loading photos…</p>}
             <div className="report-scroll">
               {records.map((r, idx) => {
                 const structureNo = idx + 1;
-                const rows = buildReportRows(r);
+                const rows = reportRows(r, questionIndex);
                 const photos = photoUrls[r.id] || [];
-                const pages = chunk(photos, 4);
+                const pages = chunk(photos, 2);
                 return (
                   <div key={r.id} className="work-structure">
                     <section className="work-page">
                       <h3 className="work-header">{projectName}</h3>
-                      <p className="work-title">Page-1 (Structure-{structureNo})</p>
+                      <p className="work-title">
+                        Table {structureNo} {categoryTitle(r.structure_category)} at Chainage Km {r.chainage || "—"}
+                      </p>
                       <table className="work-table">
                         <thead>
                           <tr>
@@ -325,32 +311,21 @@ export function PreviewModal({ open, mode, records, onClose, onDownloadWord, onD
                       </table>
                     </section>
 
-                    {pages.map((pagePhotos, pageIdx) => {
-                      const pageNo = pageIdx + 2;
-                      const cells = Array.from({ length: 4 }, (_, i) => pagePhotos[i] ?? null);
-                      return (
-                        <section key={`${r.id}-photos-${pageIdx}`} className="work-page">
-                          <h3 className="work-header">{projectName}</h3>
-                          <p className="work-title">
-                            Page-{pageNo} (Photos of Structure-{structureNo})
-                          </p>
-                          <div className="work-photo-grid">
-                            {cells.map((src, i) => (
-                              <div key={`${r.id}-p${pageIdx}-${i}`} className="work-photo-cell">
-                                {src ? (
-                                  <img src={src} alt={`Photo-${pageIdx * 4 + i + 1}`} />
-                                ) : (
-                                  <span className="work-photo-placeholder">Photo-{pageIdx * 4 + i + 1}</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                          {!photos.length && pageIdx === 0 && (
-                            <p className="work-empty">No photos captured for this structure.</p>
-                          )}
-                        </section>
-                      );
-                    })}
+                    {pages.map((pagePhotos, pageIdx) => (
+                      <section key={`${r.id}-photos-${pageIdx}`} className="work-page">
+                        <p className="work-title" style={{ textAlign: "center", textDecoration: "underline" }}>
+                          Chainage:- {r.chainage || "—"} {categoryTitle(r.structure_category).toUpperCase()}
+                        </p>
+                        <div className="work-photo-grid" style={{ gridTemplateColumns: "1fr" }}>
+                          {pagePhotos.map((src, i) => (
+                            <div key={`${r.id}-p${pageIdx}-${i}`} className="work-photo-cell">
+                              <img src={src} alt={`Photo-${pageIdx * 2 + i + 1}`} style={{ maxHeight: 260 }} />
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    ))}
+                    {!photos.length && <p className="work-empty">No photographs available for this structure.</p>}
                   </div>
                 );
               })}

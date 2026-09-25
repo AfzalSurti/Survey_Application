@@ -415,8 +415,8 @@ export function Records() {
     }
   };
 
-  const downloadReport = async (reportFmt: "docx" | "pdf") => {
-    const ids = previewRecords.map((r) => r.id);
+  const downloadReport = async (reportFmt: "docx" | "pdf", recordIds?: string[]) => {
+    const ids = recordIds ?? previewRecords.map((r) => r.id);
     if (!ids.length) return alert("No records to download.");
     setBusy(true);
     try {
@@ -714,7 +714,7 @@ export function Records() {
             <span>Structures</span>
             <strong>{projectStructures.length} surveyed</strong>
           </div>
-          <div style={{ display: "flex", gap: 8, margin: "10px 0 16px" }}>
+          <div style={{ display: "flex", gap: 8, margin: "10px 0 16px", flexWrap: "wrap", alignItems: "center" }}>
             <button type="button" className="link-btn" onClick={() => openPreview("excel", selected)}>
               Preview Excel
             </button>
@@ -726,6 +726,18 @@ export function Records() {
               disabled={busy}
             >
               Download Excel (this project)
+            </button>
+            <button type="button" className="link-btn" onClick={() => openPreview("word", selected)}>
+              Preview Report
+            </button>
+            <button
+              type="button"
+              className="button"
+              style={{ padding: "6px 12px", fontSize: ".82rem" }}
+              onClick={() => downloadReport("pdf", (projectStructures.length ? projectStructures : [selected]).map((r) => r.id))}
+              disabled={busy}
+            >
+              Download PDF (this project)
             </button>
           </div>
 
