@@ -823,6 +823,15 @@ type EditableQuestion = {
   columns: string[];
   /** Value rows for matrix-style dropdowns (2–4 cells each). */
   matrixRows: MatrixRow[];
+  /** The question exactly as stored. Whatever this editor doesn't edit (is_unique_key, note,
+   *  number/date types, …) is carried through untouched on publish instead of being dropped. */
+  raw: Record<string, unknown>;
+  /** Dropdown also accepts a hand-typed value. */
+  allowOther: boolean;
+  /** Conditions kept as stored ({q,in} / {q,not_in} / {any} / {all}); null = none. */
+  showIf: Record<string, unknown> | null;
+  requiredIf: Record<string, unknown> | null;
+  prefillFrom: string;
 };
 
 const UI_TYPE_OPTIONS: { value: UiQuestionType; label: string }[] = [
@@ -895,7 +904,23 @@ function matrixToOptions(uiType: UiQuestionType, rows: MatrixRow[]): string[] {
     .filter(Boolean);
 }
 
-function parseQuestion(q: Record<string, unknown>): EditableQuestion {
+function asStoredCondition(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+/** A single {q,in} / {q,not_in} can be edited here; richer ones ({any}/{all}) are kept as-is, shown read-only. */
+function simpleCondition(c: Record<string, unknown> | null): { q: string; mode: "in" | "not_in"; values: string[] } | null {
+  if (!c || typeof c.q !== "string") return null;
+  if (Array.isArray(c.in)) return { q: c.q, mode: "in", values: c.in.map(String) };
+  if (Array.isArray(c.not_in)) return { q: c.q, mode: "not_in", values: c.not_in.map(String) };
+  return null;
+}
+
+function buildCondition(q: string, mode: "in" | "not_in", values: string[]): Record<string, unknown> | null {
+  return q ? { q, [mode]: values } : null;
+}
+
+export function parseQuestion(q: Record<string, unknown>): EditableQuestion {
   const uiType = toUiType(q);
   const options = Array.isArray(q.options)
     ? q.options.map((o) => (typeof o === "string" ? o : String((o as { label?: string; value?: string }).label || (o as { value?: string }).value || "")))
@@ -929,7 +954,117 @@ function parseQuestion(q: Record<string, unknown>): EditableQuestion {
     options: options.length ? options : needsOptions(uiType) && !isMatrixType(uiType) ? [""] : [],
     columns: columns.length ? columns : defaultColumns(uiType),
     matrixRows,
+    raw: q,
+    allowOther: q.allow_other === true,
+    showIf: asStoredCondition(q.show_if),
+    requiredIf: asStoredCondition(q.required_if),
+    prefillFrom: typeof q.prefill_from === "string" ? q.prefill_from : "",
   };
+}
+
+/** Editor question -> stored schema question. Starts from `raw` so nothing the editor doesn't show is lost
+ *  (is_unique_key, note, number/date types, conditions, …). */
+export function serializeQuestion(q: EditableQuestion): Record<string, unknown> {
+  const item: Record<string, unknown> = { ...q.raw, id: q.id, label: q.label.trim() || q.id, required: q.required };
+  const typeUnchanged = Object.keys(q.raw).length > 0 && toUiType(q.raw) === q.uiType;
+  if (!typeUnchanged) {
+    const mapped = fromUiType(q.uiType);
+    item.type = mapped.type;
+    if (mapped.ui) item.ui = mapped.ui;
+    else delete item.ui;
+    delete item.options;
+    delete item.columns;
+    delete item.matrix_rows;
+  }
+  if (q.uiType === "multiple_selection" || q.uiType === "dropdown_1_row") {
+    item.options = q.options.map((o) => o.trim()).filter(Boolean);
+  }
+  if (isMatrixType(q.uiType)) {
+    item.columns = q.columns;
+    item.matrix_rows = q.matrixRows;
+    item.options = matrixToOptions(q.uiType, q.matrixRows);
+  }
+  if (q.allowOther && q.uiType === "dropdown_1_row") item.allow_other = true;
+  else delete item.allow_other;
+  if (q.showIf) item.show_if = q.showIf;
+  else delete item.show_if;
+  if (q.requiredIf) item.required_if = q.requiredIf;
+  else delete item.required_if;
+  if (q.prefillFrom) item.prefill_from = q.prefillFrom;
+  else delete item.prefill_from;
+  return item;
+}
+
+function ConditionPicker({
+  label,
+  value,
+  earlier,
+  onChange,
+}: {
+  label: string;
+  value: Record<string, unknown> | null;
+  earlier: EditableQuestion[];
+  onChange: (next: Record<string, unknown> | null) => void;
+}) {
+  const simple = simpleCondition(value);
+  if (value && !simple) {
+    return (
+      <div className="schema-cond">
+        <span className="schema-cond-label">{label}</span>
+        <span className="muted">Custom condition (kept as is): {JSON.stringify(value)}</span>
+        <button type="button" className="link-btn" onClick={() => onChange(null)}>
+          Clear
+        </button>
+      </div>
+    );
+  }
+  const source = earlier.find((e) => e.id === simple?.q);
+  const choices = source
+    ? (isMatrixType(source.uiType) ? matrixToOptions(source.uiType, source.matrixRows) : source.options).map((o) => o.trim()).filter(Boolean)
+    : [];
+  const values = simple?.values ?? [];
+  return (
+    <div className="schema-cond">
+      <span className="schema-cond-label">{label}</span>
+      <select className="field" value={simple?.q ?? ""} onChange={(e) => onChange(buildCondition(e.target.value, simple?.mode ?? "in", []))}>
+        <option value="">— always —</option>
+        {simple && !source ? <option value={simple.q}>{simple.q} (not found above)</option> : null}
+        {earlier.map((e) => (
+          <option key={e.id} value={e.id}>
+            {(e.label || e.id).slice(0, 60)}
+          </option>
+        ))}
+      </select>
+      {simple ? (
+        <>
+          <select className="field" value={simple.mode} onChange={(e) => onChange(buildCondition(simple.q, e.target.value as "in" | "not_in", values))}>
+            <option value="in">is one of</option>
+            <option value="not_in">is none of</option>
+          </select>
+          <div className="schema-cond-values">
+            {choices.map((c) => (
+              <label key={c}>
+                <input
+                  type="checkbox"
+                  checked={values.includes(c)}
+                  onChange={() => onChange(buildCondition(simple.q, simple.mode, values.includes(c) ? values.filter((v) => v !== c) : [...values, c]))}
+                />{" "}
+                {c}
+              </label>
+            ))}
+            {!choices.length ? (
+              <input
+                className="field"
+                placeholder="value"
+                value={values[0] ?? ""}
+                onChange={(e) => onChange(buildCondition(simple.q, simple.mode, e.target.value ? [e.target.value] : []))}
+              />
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 export function SchemaEditor() {
@@ -1163,6 +1298,11 @@ export function SchemaEditor() {
         options: [],
         columns: [],
         matrixRows: [],
+        raw: {},
+        allowOther: false,
+        showIf: null,
+        requiredIf: null,
+        prefillFrom: "",
       },
     ]);
   };
@@ -1177,25 +1317,7 @@ export function SchemaEditor() {
       if (categoryKey) {
         cats[categoryKey] = {
           ...((cats[categoryKey] as object) || {}),
-          questions: questions.map((q) => {
-            const mapped = fromUiType(q.uiType);
-            const item: Record<string, unknown> = {
-              id: q.id,
-              label: q.label.trim() || q.id,
-              type: mapped.type,
-              required: q.required,
-            };
-            if (mapped.ui) item.ui = mapped.ui;
-            if (q.uiType === "multiple_selection" || q.uiType === "dropdown_1_row") {
-              item.options = q.options.map((o) => o.trim()).filter(Boolean);
-            }
-            if (isMatrixType(q.uiType)) {
-              item.columns = q.columns;
-              item.matrix_rows = q.matrixRows;
-              item.options = matrixToOptions(q.uiType, q.matrixRows);
-            }
-            return item;
-          }),
+          questions: questions.map(serializeQuestion),
         };
       }
       const schema_json = { ...rawSchema, categories: cats };
@@ -1345,6 +1467,18 @@ export function SchemaEditor() {
                     onChange={(e) => updateQuestion(q.id, { label: e.target.value })}
                   />
                   {renderAnswerEditor(q)}
+                  <div className="schema-logic">
+                    <label className="schema-check">
+                      <input type="checkbox" checked={q.required} onChange={(e) => updateQuestion(q.id, { required: e.target.checked }, true)} /> Compulsory
+                    </label>
+                    {q.uiType === "dropdown_1_row" ? (
+                      <label className="schema-check">
+                        <input type="checkbox" checked={q.allowOther} onChange={(e) => updateQuestion(q.id, { allowOther: e.target.checked }, true)} /> Allow manual entry (“Other”)
+                      </label>
+                    ) : null}
+                    <ConditionPicker label="Show only when" value={q.showIf} earlier={questions.slice(0, index)} onChange={(v) => updateQuestion(q.id, { showIf: v }, true)} />
+                    <ConditionPicker label="Also compulsory when" value={q.requiredIf} earlier={questions.slice(0, index)} onChange={(v) => updateQuestion(q.id, { requiredIf: v }, true)} />
+                  </div>
                 </div>
                 <div className="schema-type-col">
                   <label className="schema-label">

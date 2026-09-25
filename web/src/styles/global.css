@@ -245,3 +245,10 @@ h1,h2,h3 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: 
   .schema-matrix-headers.cols-4,
   .schema-matrix-row.cols-4 { grid-template-columns: 1fr auto; }
 }
+
+.schema-logic { display: grid; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(27,79,140,.18); }
+.schema-check { display: inline-flex; align-items: center; gap: 6px; font-size: .82rem; }
+.schema-cond { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: .82rem; }
+.schema-cond-label { font-weight: 700; min-width: 130px; }
+.schema-cond-values { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.schema-cond-values label { display: inline-flex; gap: 4px; align-items: center; }
