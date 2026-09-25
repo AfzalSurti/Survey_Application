@@ -52,9 +52,10 @@ import {
   UTILITY_CATEGORIES,
   UTILITY_SURVEY_DESCRIPTION,
 } from "@/content/copy";
+import { applyAnswer, isRequiredNow, visibleAnswers, visibleQuestionIds } from "@/lib/conditions";
 import { newId } from "@/lib/id";
 import { wakeServer } from "@/lib/wakeServer";
-import { FormSchema, Question, QuestionType, SurveyRecord } from "@/types";
+import { Condition, FormSchema, Question, QuestionType, SurveyRecord } from "@/types";
 import { syncPending, type SyncSnapshot } from "@/sync/engine";
 
 export type RootStack = {
@@ -99,7 +100,20 @@ function normalizeQuestion(raw: Record<string, unknown>): Question {
     required: raw.required !== false,
     options: options?.filter(Boolean),
     minPhotos: typeof raw.minPhotos === "number" ? raw.minPhotos : 4,
+    allowOther: raw.allow_other === true,
+    showIf: asCondition(raw.show_if),
+    requiredIf: asCondition(raw.required_if),
+    prefillFrom: typeof raw.prefill_from === "string" && raw.prefill_from ? raw.prefill_from : undefined,
   };
+}
+
+/** Accept only well-formed conditions; anything else is ignored rather than crashing the form. */
+function asCondition(value: unknown): Condition | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const c = value as Record<string, unknown>;
+  if (typeof c.q === "string" && (Array.isArray(c.in) || Array.isArray(c.not_in))) return value as Condition;
+  if (Array.isArray(c.any) || Array.isArray(c.all)) return value as Condition;
+  return undefined;
 }
 
 /** Backend stores questions under schema_json.categories[key].questions (+ shared photo group). */
@@ -562,17 +576,29 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
     };
   }, [module, category]);
 
-  const setAnswer = (id: string, value: unknown) => setAnswers((v) => ({ ...v, [id]: value }));
+  const setAnswer = (id: string, value: unknown) => setAnswers((prev) => applyAnswer(schema.questions, prev, id, value));
 
-  const answerCount = Object.keys(answers).filter((k) => answers[k] !== undefined && answers[k] !== "").length;
-  const answerTotal = Math.max(schema.questions.filter((q) => q.type !== "photo_group").length, 1);
+  // Questions can be conditional (show_if) — everything below counts, validates
+  // and saves only what is actually on screen right now.
+  const visibleIds = useMemo(() => visibleQuestionIds(schema.questions, answers), [schema.questions, answers]);
+  const [otherOpen, setOtherOpen] = useState<Record<string, boolean>>({});
+
+  const shownQuestions = schema.questions.filter((q) => q.type !== "photo_group" && visibleIds.has(q.id));
+  const answerCount = shownQuestions.filter((q) => answers[q.id] !== undefined && answers[q.id] !== "").length;
+  const answerTotal = Math.max(shownQuestions.length, 1);
   const progressPct = Math.min(100, Math.round((answerCount / answerTotal) * 100));
 
   const submit = async () => {
     if (loadState !== "ready") {
       return reasonAlert("Form not ready", loadError || "Wait until questions finish loading before submitting.");
     }
-    const missing = schema.questions.filter((q) => q.required && q.type !== "photo_group" && (answers[q.id] === undefined || answers[q.id] === ""));
+    const missing = schema.questions.filter(
+      (q) =>
+        q.type !== "photo_group" &&
+        visibleIds.has(q.id) &&
+        isRequiredNow(q, answers) &&
+        (answers[q.id] === undefined || answers[q.id] === ""),
+    );
     if (missing.length) {
       return reasonAlert(
         "Incomplete form",
@@ -593,7 +619,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       category,
       chainage: String(answers.chainage ?? "").trim(),
       responses: {
-        ...answers,
+        ...visibleAnswers(schema.questions, answers),
         structure_category: category,
         gps: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
         capturedAt: new Date().toISOString(),
@@ -670,6 +696,8 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
   };
 
   const renderQuestion = (q: Question) => {
+    if (q.type !== "photo_group" && !visibleIds.has(q.id)) return null;
+    const star = isRequiredNow(q, answers) ? " *" : "";
     if (q.type === "photo_group") {
       const min = q.minPhotos ?? 4;
       return (
@@ -696,17 +724,41 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       );
     }
     if (q.type === "select" || q.type === "condition_rating") {
+      const current = answers[q.id];
+      // "Other": the dropdown also accepts a hand-typed value (schema allow_other).
+      const isOther = q.allowOther === true && otherOpen[q.id] === true;
       return (
         <View key={q.id} style={styles.qBlock}>
           <Label>
             {q.label}
-            {q.required ? " *" : ""}
+            {star}
           </Label>
           <View style={styles.options}>
             {(q.options ?? []).map((option) => (
-              <ChoicePill key={option} label={option} selected={answers[q.id] === option} onPress={() => setAnswer(q.id, option)} />
+              <ChoicePill
+                key={option}
+                label={option}
+                selected={!isOther && current === option}
+                onPress={() => {
+                  setOtherOpen((o) => ({ ...o, [q.id]: false }));
+                  setAnswer(q.id, option);
+                }}
+              />
             ))}
+            {q.allowOther ? (
+              <ChoicePill
+                label="Other (type manually)"
+                selected={isOther}
+                onPress={() => {
+                  setOtherOpen((o) => ({ ...o, [q.id]: true }));
+                  if ((q.options ?? []).includes(String(current))) setAnswer(q.id, "");
+                }}
+              />
+            ) : null}
           </View>
+          {isOther ? (
+            <Field value={String(current ?? "")} onChangeText={(v) => setAnswer(q.id, v)} placeholder="Type the value" />
+          ) : null}
         </View>
       );
     }
@@ -715,7 +767,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
         <View key={q.id} style={styles.qBlock}>
           <Label>
             {q.label}
-            {q.required ? " *" : ""}
+            {star}
           </Label>
           <View style={styles.options}>
             {(q.options ?? []).map((option) => {
@@ -750,7 +802,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       <View key={q.id} style={styles.qBlock}>
         <Label>
           {q.label}
-          {q.required ? " *" : ""}
+          {star}
         </Label>
         <Field
           value={String(answers[q.id] ?? "")}
