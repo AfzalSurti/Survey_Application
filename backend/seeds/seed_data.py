@@ -19,7 +19,12 @@ from seeds.questionnaire_v1 import (
     UTILITY_SHIFTING_SCHEMA,
     count_questions,
 )
-from seeds.questionnaire_v2 import STRUCTURE_INVENTORY_SCHEMA_V2, validate_v2
+try:
+    from seeds.questionnaire_v2 import STRUCTURE_INVENTORY_SCHEMA_V2, validate_v2
+except Exception as exc:  # noqa: BLE001 — a broken v2 must never stop the API from starting
+    STRUCTURE_INVENTORY_SCHEMA_V2 = None  # type: ignore[assignment]
+    validate_v2 = None  # type: ignore[assignment]
+    print(f"WARNING: questionnaire v2 could not be loaded ({type(exc).__name__}: {exc}); it will be skipped")
 
 
 async def apply_structure_inventory_v2() -> None:
@@ -34,6 +39,8 @@ async def apply_structure_inventory_v2() -> None:
       it is left exactly as is, and is never re-activated behind their back.
     """
     module = "structure_inventory"
+    if STRUCTURE_INVENTORY_SCHEMA_V2 is None or validate_v2 is None:
+        return
     try:
         problems = validate_v2()
         if problems:
