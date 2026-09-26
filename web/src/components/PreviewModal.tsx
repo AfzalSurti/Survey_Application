@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { apiBaseUrl } from "../lib/wakeServer";
 import { client, type RecordItem } from "../api/client";
-import { buildQuestionIndex, categoryTitle, chainageOrder, reportRows, type QuestionIndex, type StoredSchema } from "../lib/reportRows";
+import { buildQuestionIndex, bulletItems, categoryTitle, chainageOrder, reportRows, type QuestionIndex, type StoredSchema } from "../lib/reportRows";
 import { ActionButton } from "./UI";
 
 const fmt = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
@@ -274,7 +274,7 @@ export function PreviewModal({ open, mode, records: unsortedRecords, onClose, on
         ) : (
           <>
             <p className="muted">
-              Project report — one table per structure (in chainage order), then its photos, two per page. Download as
+              Project report preview — one table per structure (in chainage order) with its observations and recommendations, then its photos, two per page. The downloaded PDF also includes the cover page, contents, introduction and summary of structures. Download as
               ready-to-share PDF or editable .docx — photos are pulled from cloud storage.
             </p>
             {photosLoading && <p className="muted">Loading photos…</p>}
@@ -309,6 +309,21 @@ export function PreviewModal({ open, mode, records: unsortedRecords, onClose, on
                           ))}
                         </tbody>
                       </table>
+                      {(["observations", "recommendations"] as const).map((key) => {
+                        const items = bulletItems(r, key);
+                        return items.length ? (
+                          <div key={key}>
+                            <p className="work-title" style={{ marginTop: 12 }}>
+                              {key === "observations" ? "Observations:" : "Recommendations:"}
+                            </p>
+                            <ul style={{ margin: "0 0 0 18px", padding: 0 }}>
+                              {items.map((t, i) => (
+                                <li key={i}>{t}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null;
+                      })}
                     </section>
 
                     {pages.map((pagePhotos, pageIdx) => (

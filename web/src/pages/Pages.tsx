@@ -1725,6 +1725,36 @@ export function ProjectsPage() {
     setAssignIds(p.surveyor_ids || []);
   };
 
+  const REPORT_FIELDS = [
+    ["client_name", "Client (e.g. National Highways Authority of India)", false],
+    ["piu_name", "Name of PIU", false],
+    ["consultant_name", "DPR Consultant", false],
+    ["association_name", "In association with", false],
+    ["work_name", "Name of Work (full title)", true],
+    ["background_text", "Project background (optional — leave empty to write it automatically)", true],
+  ] as const;
+  const [reportForm, setReportForm] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setReportForm(
+      Object.fromEntries(REPORT_FIELDS.map(([key]) => [key, ((selected as Record<string, unknown> | null)?.[key] as string) || ""])),
+    );
+  }, [selected?.id]);
+
+  const saveReportDetails = async () => {
+    if (!selected || busy) return;
+    setBusy(true);
+    try {
+      const updated = await client.patch<Project>(`/projects/${selected.id}/report-details`, reportForm);
+      setProjects((list) => list.map((p) => (p.id === updated.id ? updated : p)));
+      setSelected(updated);
+      alert("Report details saved — they appear on the cover and introduction of the project PDF.");
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const saveAssign = async () => {
     if (!selected || busy) return;
     setBusy(true);
@@ -1822,6 +1852,31 @@ export function ProjectsPage() {
                 </label>
               ))}
               <button className="button" onClick={saveAssign} disabled={busy}>Save assignments</button>
+
+              <h3 style={{ marginTop: 22 }}>Report details — {selected.name}</h3>
+              <p className="muted" style={{ marginBottom: 8 }}>
+                Printed on the cover page and introduction of this project's Inventory Survey Report (PDF). Any field can be left empty.
+              </p>
+              {REPORT_FIELDS.map(([key, label, long]) => (
+                <div className="form-row" key={key}>
+                  <label>{label}</label>
+                  {long ? (
+                    <textarea
+                      className="field"
+                      rows={key === "background_text" ? 4 : 2}
+                      value={reportForm[key] || ""}
+                      onChange={(e) => setReportForm((f) => ({ ...f, [key]: e.target.value }))}
+                    />
+                  ) : (
+                    <input
+                      className="field"
+                      value={reportForm[key] || ""}
+                      onChange={(e) => setReportForm((f) => ({ ...f, [key]: e.target.value }))}
+                    />
+                  )}
+                </div>
+              ))}
+              <button className="button" onClick={saveReportDetails} disabled={busy}>Save report details</button>
             </div>
           )}
         </GlassPanel>

@@ -10,7 +10,7 @@ export type StoredSchema = { version: number; schema_json: Record<string, unknow
 /** category -> questions in questionnaire order */
 export type QuestionIndex = Record<string, { id: string; label: string; conditional: boolean }[]>;
 
-const ROW_SKIP = new Set(["gps", "capturedAt", "structure_category", "photos", "chainage", "name_of_road"]);
+const ROW_SKIP = new Set(["gps", "capturedAt", "structure_category", "photos", "chainage", "name_of_road", "observations", "recommendations"]);
 
 export function buildQuestionIndex(schemas: StoredSchema[]): QuestionIndex {
   const index: QuestionIndex = {};
@@ -83,4 +83,11 @@ export function chainageOrder(a: RecordItem, b: RecordItem): number {
   const [ga, na] = key(a);
   const [gb, nb] = key(b);
   return ga - gb || na - nb || (a.chainage || "").localeCompare(b.chainage || "");
+}
+
+/** Observations / recommendations as bullet text (a list from the new form, or lines of old free text). */
+export function bulletItems(r: RecordItem, key: "observations" | "recommendations"): string[] {
+  const value = (r.responses_json || {})[key];
+  const lines = Array.isArray(value) ? value.map(String) : typeof value === "string" ? value.split(/\r?\n/) : [];
+  return lines.map((l) => l.replace(/^\s*(?:[-*\u2022]|\d+[.)])\s*/, "").trim()).filter(Boolean);
 }

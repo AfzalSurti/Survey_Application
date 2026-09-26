@@ -13,6 +13,12 @@ export type Project = {
   created_at: string;
   surveyor_ids: string[];
   assign_date?: string | null;
+  client_name?: string | null;
+  piu_name?: string | null;
+  consultant_name?: string | null;
+  association_name?: string | null;
+  work_name?: string | null;
+  background_text?: string | null;
 };
 export type RecordItem = {
   id: string;
