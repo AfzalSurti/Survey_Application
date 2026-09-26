@@ -93,10 +93,19 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
-        """Sync URL for Alembic / psycopg2."""
+        """Sync URL for Alembic — always names psycopg2 explicitly.
+
+        A bare postgresql:// URL means "whatever the default driver is", and
+        that default changed to psycopg v3 in SQLAlchemy 2.1. Because the
+        requirements aren't pinned to one release, a fresh deploy picked up
+        2.1 and alembic crashed with "No module named 'psycopg'", which
+        stopped every new version from starting.
+        """
         url = _clean_url(self.database_url)
         if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql://", 1)
+            url = "postgresql://" + url[len("postgres://"):]
+        if url.startswith("postgresql://"):
+            url = "postgresql+psycopg2://" + url[len("postgresql://"):]
         return url
 
     @property
