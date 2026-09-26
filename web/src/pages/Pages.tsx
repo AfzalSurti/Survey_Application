@@ -359,6 +359,7 @@ export function Records() {
   const openDetails = async (r: RecordItem) => {
     setSelected(r);
     setActiveStructureId(r.id);
+    setProjectStructures((prev) => (prev.some((x) => x.project_id === r.project_id) ? prev : [r]));
     try {
       const siblings = await fetchRecords(r.project_id);
       const list = siblings.length ? siblings : [r];
@@ -415,12 +416,20 @@ export function Records() {
     }
   };
 
-  const downloadReport = async (reportFmt: "docx" | "pdf", recordIds?: string[]) => {
-    const ids = recordIds ?? previewRecords.map((r) => r.id);
-    if (!ids.length) return alert("No records to download.");
+  /** A report is always one whole project. `projectId` (from the drawer, or the project the preview was
+   *  opened for) is sent as-is and the server collects every structure itself — so what gets printed never
+   *  depends on how much of the page had finished loading when the button was pressed. */
+  const downloadReport = async (reportFmt: "docx" | "pdf", projectId?: string | null) => {
+    const scopeId = projectId ?? previewProjectId;
+    const ids = previewRecords.map((r) => r.id);
+    if (!scopeId && !ids.length) return alert("No records to download.");
     setBusy(true);
     try {
-      await client.download(`/reports/generate?fmt=${reportFmt}`, { record_ids: ids }, "POST");
+      await client.download(
+        `/reports/generate?fmt=${reportFmt}`,
+        scopeId ? { project_id: scopeId } : { record_ids: ids },
+        "POST",
+      );
     } catch (e) {
       alert((e as Error).message);
     } finally {
@@ -734,7 +743,7 @@ export function Records() {
               type="button"
               className="button"
               style={{ padding: "6px 12px", fontSize: ".82rem" }}
-              onClick={() => downloadReport("pdf", (projectStructures.length ? projectStructures : [selected]).map((r) => r.id))}
+              onClick={() => downloadReport("pdf", selected.project_id)}
               disabled={busy}
             >
               Download PDF (this project)
