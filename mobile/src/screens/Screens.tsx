@@ -104,6 +104,7 @@ function normalizeQuestion(raw: Record<string, unknown>): Question {
     showIf: asCondition(raw.show_if),
     requiredIf: asCondition(raw.required_if),
     prefillFrom: typeof raw.prefill_from === "string" && raw.prefill_from ? raw.prefill_from : undefined,
+    itemLabel: typeof raw.item_label === "string" && raw.item_label ? raw.item_label : undefined,
   };
 }
 
@@ -114,6 +115,18 @@ function asCondition(value: unknown): Condition | undefined {
   if (typeof c.q === "string" && (Array.isArray(c.in) || Array.isArray(c.not_in))) return value as Condition;
   if (Array.isArray(c.any) || Array.isArray(c.all)) return value as Condition;
   return undefined;
+}
+
+/** text_list answers: trim entries, drop blanks, and omit the key entirely when nothing was written. */
+function cleanLists(questions: Question[], answers: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...answers };
+  for (const q of questions) {
+    if (q.type !== "text_list") continue;
+    const items = (Array.isArray(out[q.id]) ? (out[q.id] as unknown[]) : []).map((v) => String(v).trim()).filter(Boolean);
+    if (items.length) out[q.id] = items;
+    else delete out[q.id];
+  }
+  return out;
 }
 
 /** Backend stores questions under schema_json.categories[key].questions (+ shared photo group). */
@@ -583,7 +596,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
   const visibleIds = useMemo(() => visibleQuestionIds(schema.questions, answers), [schema.questions, answers]);
   const [otherOpen, setOtherOpen] = useState<Record<string, boolean>>({});
 
-  const shownQuestions = schema.questions.filter((q) => q.type !== "photo_group" && visibleIds.has(q.id));
+  const shownQuestions = schema.questions.filter((q) => q.type !== "photo_group" && q.type !== "text_list" && visibleIds.has(q.id));
   const answerCount = shownQuestions.filter((q) => answers[q.id] !== undefined && answers[q.id] !== "").length;
   const answerTotal = Math.max(shownQuestions.length, 1);
   const progressPct = Math.min(100, Math.round((answerCount / answerTotal) * 100));
@@ -619,7 +632,7 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
       category,
       chainage: String(answers.chainage ?? "").trim(),
       responses: {
-        ...visibleAnswers(schema.questions, answers),
+        ...cleanLists(schema.questions, visibleAnswers(schema.questions, answers)),
         structure_category: category,
         gps: coords ? { latitude: coords.latitude, longitude: coords.longitude } : null,
         capturedAt: new Date().toISOString(),
@@ -787,6 +800,39 @@ export function DynamicFormScreen({ route, navigation }: StackProps<"DynamicForm
               );
             })}
           </View>
+        </View>
+      );
+    }
+    if (q.type === "text_list") {
+      const items = Array.isArray(answers[q.id]) ? (answers[q.id] as string[]) : [];
+      const noun = q.itemLabel || "Item";
+      return (
+        <View key={q.id} style={styles.qBlock}>
+          <Label>{q.label}</Label>
+          {items.length === 0 ? <Meta>Optional — none added yet.</Meta> : null}
+          {items.map((text, i) => (
+            <View key={`${q.id}-${i}`} style={styles.listRow}>
+              <View style={{ flex: 1 }}>
+                <Meta>
+                  {noun} {i + 1}
+                </Meta>
+                <Field
+                  value={text}
+                  multiline
+                  onChangeText={(v) => setAnswer(q.id, items.map((t, j) => (j === i ? v : t)))}
+                  placeholder={`Write ${noun.toLowerCase()} ${i + 1}`}
+                />
+              </View>
+              <Pressable
+                style={[styles.listDelete, { borderColor: theme.danger }]}
+                onPress={() => setAnswer(q.id, items.filter((_, j) => j !== i))}
+                accessibilityLabel={`Delete ${noun} ${i + 1}`}
+              >
+                <Text style={{ color: theme.danger, fontWeight: "700", fontSize: 12 }}>Delete</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Button title={`+ Add ${noun.toLowerCase()}`} variant="secondary" onPress={() => setAnswer(q.id, [...items, ""])} />
         </View>
       );
     }
@@ -1175,6 +1221,8 @@ const styles = StyleSheet.create({
   item: { marginBottom: 2 },
   setting: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8, gap: 12 },
   qBlock: { marginBottom: 6 },
+  listRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 8 },
+  listDelete: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8, marginTop: 18 },
   progressTrack: { height: 8, borderRadius: 999, overflow: "hidden" },
   progressFill: { height: "100%", borderRadius: 999 },
   loadingBox: { alignItems: "center", paddingVertical: 18, gap: 8 },

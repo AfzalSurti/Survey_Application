@@ -1,4 +1,4 @@
-export type QuestionType = "text" | "number" | "select" | "multiselect" | "condition_rating" | "date" | "photo_group";
+export type QuestionType = "text" | "number" | "select" | "multiselect" | "condition_rating" | "date" | "photo_group" | "text_list";
 
 /** Same shape the backend schema uses (show_if / required_if). */
 export type Condition =
@@ -22,6 +22,8 @@ export type Question = {
   requiredIf?: Condition;
   /** Mirrors another answer until the surveyor edits it ("same as wing wall"). */
   prefillFrom?: string;
+  /** text_list only: what one entry is called ("Observation" -> "Observation 1"). */
+  itemLabel?: string;
 };
 export type FormSchema = { version: number; questions: Question[] };
 export type SurveyRecord = { id: string; module: string; category: string; chainage: string; responses: Record<string, unknown>; latitude?: number; longitude?: number; capturedAt: string; status: "draft" | "submitted"; syncStatus: "pending" | "synced" | "error"; schemaVersion: number };
