@@ -14,6 +14,7 @@ from app.schemas.survey import (
     ProjectAssignRequest,
     ProjectCreate,
     ProjectOut,
+    ProjectReportDetails,
 )
 
 # Field workers may be surveyors (Field), admins, or super admins.
@@ -35,6 +36,12 @@ def _project_out(project: Project) -> ProjectOut:
         created_at=project.created_at,
         surveyor_ids=[a.surveyor_id for a in (project.assignments or [])],
         assign_date=min(assign_dates) if assign_dates else project.created_at,
+        client_name=project.client_name,
+        piu_name=project.piu_name,
+        consultant_name=project.consultant_name,
+        association_name=project.association_name,
+        work_name=project.work_name,
+        background_text=project.background_text,
     )
 
 
@@ -195,6 +202,27 @@ async def delete_project(
 
     await db.delete(project)
     await db.flush()
+
+
+@router.patch("/projects/{project_id}/report-details", response_model=ProjectOut)
+async def update_report_details(
+    project_id: UUID,
+    body: ProjectReportDetails,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(UserRole.super_admin)),
+) -> ProjectOut:
+    """Save the details printed on the project's report cover and introduction."""
+    project = await _load_project(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    # Only fields actually sent are touched; an empty string clears one.
+    for field in body.model_fields_set:
+        value = getattr(body, field)
+        setattr(project, field, (value or "").strip() or None)
+    await db.flush()
+    project = await _load_project(db, project_id)
+    assert project is not None
+    return _project_out(project)
 
 
 @router.put("/projects/{project_id}/assignments", response_model=ProjectOut)

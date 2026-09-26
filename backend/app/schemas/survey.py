@@ -30,6 +30,23 @@ class ProjectOut(BaseModel):
     created_at: datetime
     surveyor_ids: list[UUID] = Field(default_factory=list)
     assign_date: datetime | None = None
+    client_name: str | None = None
+    piu_name: str | None = None
+    consultant_name: str | None = None
+    association_name: str | None = None
+    work_name: str | None = None
+    background_text: str | None = None
+
+
+class ProjectReportDetails(BaseModel):
+    """Cover-page / introduction details. Blank strings clear a field."""
+
+    client_name: str | None = Field(default=None, max_length=255)
+    piu_name: str | None = Field(default=None, max_length=255)
+    consultant_name: str | None = Field(default=None, max_length=255)
+    association_name: str | None = Field(default=None, max_length=255)
+    work_name: str | None = Field(default=None, max_length=2000)
+    background_text: str | None = Field(default=None, max_length=4000)
 
 
 class ProjectAssignRequest(BaseModel):

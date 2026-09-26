@@ -84,6 +84,13 @@ class Project(Base):
     highway_number: Mapped[str] = mapped_column(String(100), nullable=False)
     key_engineer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     key_engineer_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Printed on the cover / introduction of the project's Inventory Survey Report.
+    client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    piu_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    consultant_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    association_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    work_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    background_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
