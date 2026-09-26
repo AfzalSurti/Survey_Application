@@ -35,6 +35,8 @@ def _label(key: str) -> str:
 def _cell_value(value: object) -> object:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return "\n".join(f"{i}. {text}" for i, text in enumerate(value, start=1))
     return json.dumps(value, ensure_ascii=False)
 
 

@@ -18,6 +18,7 @@ from app.services.work_report import (
     collect_photo_blobs,
     load_question_index,
     load_records_for_report,
+    load_report_context,
 )
 
 
@@ -53,12 +54,17 @@ async def generate_report(
         )
 
     question_index = await load_question_index(db)
+    context = await load_report_context(db, records)
     # The PDF puts two photos across a full page width, so it wants a sharper copy
     # than the Excel/DOCX thumbnails.
     photo_blobs = await collect_photo_blobs(records, max_width=1200 if fmt == "pdf" else 700)
     if fmt == "pdf":
         data = build_work_report_pdf(
-            project_name=project_name, records=records, photo_blobs=photo_blobs, question_index=question_index
+            project_name=project_name,
+            records=records,
+            photo_blobs=photo_blobs,
+            question_index=question_index,
+            context=context,
         )
         suffix, media_type = ".pdf", "application/pdf"
     else:
