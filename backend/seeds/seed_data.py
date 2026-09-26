@@ -21,40 +21,38 @@ from seeds.questionnaire_v1 import (
 )
 try:
     from seeds.questionnaire_v2 import STRUCTURE_INVENTORY_SCHEMA_V2, validate_v2
-except Exception as exc:  # noqa: BLE001 — a broken v2 must never stop the API from starting
-    STRUCTURE_INVENTORY_SCHEMA_V2 = None  # type: ignore[assignment]
-    validate_v2 = None  # type: ignore[assignment]
-    print(f"WARNING: questionnaire v2 could not be loaded ({type(exc).__name__}: {exc}); it will be skipped")
+    from seeds.questionnaire_v3 import STRUCTURE_INVENTORY_SCHEMA_V3, validate_v3
+except Exception as exc:  # noqa: BLE001 — a broken newer schema must never stop the API from starting
+    STRUCTURE_INVENTORY_SCHEMA_V2 = STRUCTURE_INVENTORY_SCHEMA_V3 = None  # type: ignore[assignment]
+    validate_v2 = validate_v3 = None  # type: ignore[assignment]
+    print(f"WARNING: newer questionnaire versions could not be loaded ({type(exc).__name__}: {exc}); skipping")
 
 
-async def apply_structure_inventory_v2() -> None:
-    """Roll out questionnaire v2 once, without ever overriding an admin.
+async def _roll_out(module: str, schema: dict | None, validate) -> None:
+    """Add `schema` as the new active version once, without ever overriding an admin.
 
-    Runs in its own session and swallows every error: this file runs in the
-    Render start command (`... && python seeds/seed_data.py && uvicorn ...`), so
-    an exception here would stop the API from booting.
-
-    - Only acts while v1 is the newest version. If v2 (or anything newer) is
-      already stored — e.g. a super admin published from the schema editor —
-      it is left exactly as is, and is never re-activated behind their back.
+    Own session, every error swallowed: this runs from the start-up path, so an
+    exception must never stop the API booting. Only acts while the stored
+    newest version is *older* than this one — a version a super admin published
+    (or that was already rolled out) is left exactly as is, never re-activated.
     """
-    module = "structure_inventory"
-    if STRUCTURE_INVENTORY_SCHEMA_V2 is None or validate_v2 is None:
+    if schema is None or validate is None:
         return
+    version = schema["version"]
     try:
-        problems = validate_v2()
+        problems = validate()
         if problems:
-            print(f"Questionnaire v2 NOT applied — failed validation: {problems}")
+            print(f"Questionnaire v{version} NOT applied — failed validation: {problems}")
             return
         async with AsyncSessionLocal() as db:
             newest = await db.scalar(
                 select(func.max(QuestionnaireSchema.version)).where(QuestionnaireSchema.module == module)
             )
             if newest is None:
-                print("Questionnaire v2 skipped — no v1 seeded yet")
+                print(f"Questionnaire v{version} skipped — nothing seeded yet for {module}")
                 return
-            if newest >= STRUCTURE_INVENTORY_SCHEMA_V2["version"]:
-                print(f"Questionnaire v2 already present (newest is v{newest}) — skipped")
+            if newest >= version:
+                print(f"Questionnaire v{version} already present (newest is v{newest}) — skipped")
                 return
             currently_active = await db.execute(
                 select(QuestionnaireSchema).where(
@@ -66,20 +64,18 @@ async def apply_structure_inventory_v2() -> None:
                 row.is_active = False
             db.add(
                 QuestionnaireSchema(
-                    id=uuid.uuid4(),
-                    module=module,
-                    version=STRUCTURE_INVENTORY_SCHEMA_V2["version"],
-                    schema_json=STRUCTURE_INVENTORY_SCHEMA_V2,
-                    is_active=True,
+                    id=uuid.uuid4(), module=module, version=version, schema_json=schema, is_active=True
                 )
             )
             await db.commit()
-            print(
-                f"Seeded {module} v{STRUCTURE_INVENTORY_SCHEMA_V2['version']} as active "
-                f"({count_questions(STRUCTURE_INVENTORY_SCHEMA_V2)} category questions)"
-            )
-    except Exception as exc:  # noqa: BLE001 — must never block API startup
-        print(f"WARNING: questionnaire v2 not applied ({type(exc).__name__}: {exc}); continuing on existing schema")
+            print(f"Seeded {module} v{version} as active ({count_questions(schema)} category questions)")
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: questionnaire v{version} not applied ({type(exc).__name__}: {exc}); continuing")
+
+
+async def apply_structure_inventory_upgrades() -> None:
+    await _roll_out("structure_inventory", STRUCTURE_INVENTORY_SCHEMA_V2, validate_v2)
+    await _roll_out("structure_inventory", STRUCTURE_INVENTORY_SCHEMA_V3, validate_v3)
 
 
 async def seed() -> None:
@@ -175,7 +171,7 @@ async def seed() -> None:
 
         await db.commit()
 
-    await apply_structure_inventory_v2()
+    await apply_structure_inventory_upgrades()
     print("Seed complete.")
 
 

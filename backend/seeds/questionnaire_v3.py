@@ -75,4 +75,10 @@ def validate_v3(v2: dict = STRUCTURE_INVENTORY_SCHEMA_V2, v3: dict = STRUCTURE_I
                     problems.append(f"{category}: missing {qid}")
                 elif q["required"] or q["type"] != "text_list":
                     problems.append(f"{category}.{qid} must be an optional text_list")
-    return problems + validate_v2(v2=v3)
+    baseline = copy.deepcopy(v2)
+    for category in LIST_CATEGORIES:
+        baseline["categories"][category]["questions"] = [
+            q for q in baseline["categories"][category]["questions"] if q["id"] != OLD_COMBINED_FIELD
+        ]
+    # ids unique, conditions/prefills refer to earlier questions, nothing else dropped
+    return problems + validate_v2(v1=baseline, v2=v3)
