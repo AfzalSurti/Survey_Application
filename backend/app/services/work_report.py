@@ -734,6 +734,22 @@ async def load_question_index(db: AsyncSession) -> QuestionIndex:
     return build_question_index([(version, schema_json or {}) for version, schema_json in rows])
 
 
+async def load_project_records_for_report(
+    db: AsyncSession, project_id: UUID, *, surveyor_id: UUID | None = None
+) -> tuple[str, list[SurveyRecord]]:
+    """Every structure of a project, in chainage order (a surveyor only ever gets their own)."""
+    query = (
+        select(SurveyRecord)
+        .where(SurveyRecord.project_id == project_id)
+        .options(selectinload(SurveyRecord.photos), selectinload(SurveyRecord.project))
+    )
+    if surveyor_id is not None:
+        query = query.where(SurveyRecord.surveyor_id == surveyor_id)
+    records = sorted(((await db.execute(query)).scalars().unique().all()), key=_chainage_sort_key)
+    project = records[0].project if records else await db.get(Project, project_id)
+    return (project.name if project else ""), records
+
+
 async def load_report_context(db: AsyncSession, records: list[SurveyRecord]) -> ReportContext:
     """Project details + site-visit dates (first/last capture) for the cover and introduction."""
     project = None

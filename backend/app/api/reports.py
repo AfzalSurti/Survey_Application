@@ -16,6 +16,7 @@ from app.services.work_report import (
     build_work_report_docx,
     build_work_report_pdf,
     collect_photo_blobs,
+    load_project_records_for_report,
     load_question_index,
     load_records_for_report,
     load_report_context,
@@ -41,11 +42,18 @@ async def generate_report(
     if fmt not in {"docx", "pdf"}:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="fmt must be docx or pdf")
 
-    project_name, records = await load_records_for_report(db, body.record_ids)
-    if len(records) != len(set(body.record_ids)):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more survey records were not found")
-    if user.role == UserRole.surveyor and any(record.surveyor_id != user.id for record in records):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report on another surveyor's records")
+    if body.project_id is not None and not body.record_ids:
+        project_name, records = await load_project_records_for_report(
+            db, body.project_id, surveyor_id=user.id if user.role == UserRole.surveyor else None
+        )
+        if not records:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This project has no surveyed structures yet")
+    else:
+        project_name, records = await load_records_for_report(db, body.record_ids)
+        if len(records) != len(set(body.record_ids)):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more survey records were not found")
+        if user.role == UserRole.surveyor and any(record.surveyor_id != user.id for record in records):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot report on another surveyor's records")
 
     if len({record.project_id for record in records}) > 1:
         raise HTTPException(

@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models import SurveyStatus, SyncStatus
 
@@ -162,7 +162,20 @@ class SurveyPhotoOut(BaseModel):
 
 
 class GenerateReportRequest(BaseModel):
-    record_ids: list[UUID] = Field(min_length=1)
+    """Ask for a report by record ids, or by project (every structure in it).
+
+    project_id is what the project screen sends: the server collects the
+    structures itself, so the result can't depend on what the page had loaded.
+    """
+
+    record_ids: list[UUID] = Field(default_factory=list)
+    project_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "GenerateReportRequest":
+        if not self.record_ids and self.project_id is None:
+            raise ValueError("Send record_ids or project_id")
+        return self
 
 
 class SettingUpdate(BaseModel):
